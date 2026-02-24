@@ -3,15 +3,21 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/renan-alm/gh-cost-center/internal/config"
 )
 
 var (
 	// Global flags
 	cfgFile string
 	verbose bool
+
+	// cfgManager is the loaded configuration, available to all subcommands.
+	cfgManager *config.Manager
 )
 
 // rootCmd represents the base command when called without any subcommands.
@@ -55,6 +61,24 @@ Examples:
   gh cost-center report`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Set up logger.
+		level := slog.LevelInfo
+		if verbose {
+			level = slog.LevelDebug
+		}
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+		slog.SetDefault(logger)
+
+		// Load configuration.
+		mgr, err := config.Load(cfgFile, logger)
+		if err != nil {
+			return fmt.Errorf("loading configuration: %w", err)
+		}
+		cfgManager = mgr
+		cfgManager.CheckConfigWarnings()
+		return nil
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

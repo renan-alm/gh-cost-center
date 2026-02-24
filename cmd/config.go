@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -18,9 +20,23 @@ Examples:
   gh cost-center config
   gh cost-center config --config path/to/config.yaml`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// TODO: Wire to business logic in later PRs
-		fmt.Println("config command called")
+		summary := cfgManager.Summary()
+
+		// Print in sorted key order for deterministic output.
+		keys := make([]string, 0, len(summary))
+		for k := range summary {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		fmt.Println("Current configuration:")
+		fmt.Println(strings.Repeat("-", 50))
+		for _, k := range keys {
+			fmt.Printf("  %-35s %v\n", k+":", summary[k])
+		}
+		fmt.Println(strings.Repeat("-", 50))
 		fmt.Printf("  config file: %s\n", cfgFile)
+
 		return nil
 	},
 }
