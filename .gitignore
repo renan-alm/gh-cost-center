@@ -71,6 +71,15 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
+# Go build artifacts
+gh-cost-center
+gh-cost-center.exe
+*.exe
+*.exe~
+*.dll
+*.dylib
+vendor/
+
 # Project specific
 # Allow main config to be committed now that token is removed; ignore local overrides
 !config/config.yaml

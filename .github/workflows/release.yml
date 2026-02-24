@@ -1,0 +1,21 @@
+# Release workflow for gh-cost-center extension.
+# Uses gh-extension-precompile to build cross-compiled binaries
+# and attach them to GitHub releases automatically.
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cli/gh-extension-precompile@v2
+        with:
+          go_version_file: go.mod
