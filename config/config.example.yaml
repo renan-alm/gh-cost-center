@@ -1,167 +1,148 @@
+# ============================================================
+# gh-cost-center configuration
+# ============================================================
+# Authentication is handled by `gh auth login` — no token needed here.
+#
+# Copy this file to config/config.yaml and edit the values below.
+
 # GitHub Configuration
 github:
   # GitHub Enterprise name (required)
   enterprise: "your_enterprise_name"
-  
+
   # GitHub API base URL (optional)
   # Default: "https://api.github.com" (standard GitHub.com)
-  # 
+  #
   # For GitHub Enterprise Data Resident, use:
   #   api_base_url: "https://api.{your-subdomain}.ghe.com"
-  #   Example: "https://api.octocorp.ghe.com"
   #
   # For GitHub Enterprise Server (self-hosted), use:
   #   api_base_url: "https://{your-hostname}/api/v3"
   #
   # Leave commented or set to null to use standard GitHub.com API
   # api_base_url: null
-  
+
   # Cost Center Assignment Mode
   # Determines how repositories/users are assigned to cost centers
   # Options: 'users', 'teams', or 'repository'
   cost_centers:
     mode: "users"  # Default: user-based assignment (PRU exceptions)
-    
+
     # ========================================
     # Repository Mode Configuration
     # ========================================
     # Use this mode to assign repositories to cost centers based on custom properties.
     # Requires: Organization custom properties to be configured in your GitHub organization.
-    # 
+    #
     # To enable repository mode:
     # 1. Set mode: "repository" above
     # 2. Configure explicit_mappings below
     # 3. Ensure repositories have the custom properties you're mapping
-    # 
-    # Example custom property setup (in GitHub UI):
-    #   Property Name: "team"
-    #   Property Type: string or single_select
-    #   Values: "platform", "frontend", "backend", "data", etc.
     #
     repository_config:
-      # Explicit Mapping Mode (Recommended)
-      # Map specific custom property values to cost centers.
-      # This mode is most flexible when organizations use generic properties like "team", "service", or "environment"
-      # 
       explicit_mappings:
-        # Example 1: Map repositories with team property to cost centers
+        # Map repositories by team property
         - cost_center: "Platform Engineering"
-          property_name: "team"  # Name of the custom property to check
-          property_values:  # Repositories with any of these values will be assigned
+          property_name: "team"
+          property_values:
             - "platform"
             - "infrastructure"
             - "devops"
-        
-        # Example 2: Assign production services to a specific cost center
+
+        # Map by environment
         - cost_center: "Production Services"
           property_name: "environment"
           property_values:
             - "production"
-        
-        # Example 3: Group by service type
+
+        # Map by service type
         - cost_center: "Frontend Applications"
           property_name: "service"
           property_values:
             - "web"
             - "mobile"
             - "ui"
-        
-        # Example 4: Data team repositories
+
+        # Data team repositories
         - cost_center: "Data & Analytics"
           property_name: "team"
           property_values:
             - "data"
             - "analytics"
             - "ml"
-      
+
       # NOTES:
       # - If a cost center doesn't exist, it will be created automatically
-      # - Repositories can match multiple mappings (they'll be added to multiple cost centers)
+      # - Repositories can match multiple mappings
       # - Repositories without the specified property will be skipped
-      # - Property names are case-sensitive and must match exactly
-      # - Property values are also case-sensitive
+      # - Property names and values are case-sensitive
 
 # Logging Configuration
 logging:
   level: "INFO"
-  file: "logs/populate_cost_centers.log"
+  file: "logs/cost_centers.log"
 
 # Cost Center Configuration
 cost_centers:
   # Manual cost center IDs (only needed when auto_create is false)
   no_prus_cost_center_id: "REPLACE_WITH_NO_PRUS_COST_CENTER_ID"
   prus_allowed_cost_center_id: "REPLACE_WITH_PRUS_ALLOWED_COST_CENTER_ID"
-  
+
   # Users who should get access to PRU overages (always required)
   prus_exception_users: []
     # - "alice"
     # - "bob"
-  
+
   # Auto-creation settings (creates cost centers if they don't exist)
-  auto_create: true  # Set to false to use existing cost center IDs above
-  
+  auto_create: true
+
   # Cost center names (only used when auto_create is true)
-  no_prus_cost_center_name: "00 - No PRU overages"  # Name for no-PRU cost center
-  prus_allowed_cost_center_name: "01 - PRU overages allowed"  # Name for PRU-allowed cost center
+  no_prus_cost_center_name: "00 - No PRU overages"
+  prus_allowed_cost_center_name: "01 - PRU overages allowed"
 
 # Teams Integration Configuration
 teams:
-  # Enable teams-based cost center management
   enabled: false
-  
+
   # Scope: 'organization' (org-level teams) or 'enterprise' (enterprise-level teams)
-  scope: "enterprise"  # Options: "organization" or "enterprise"
-  
+  scope: "enterprise"
+
   # Mode: 'auto' (one cost center per team) or 'manual' (use mappings below)
-  mode: "auto"  # Options: "auto" or "manual"
-  
+  mode: "auto"
+
   # Organizations to query for teams (only used when scope is 'organization')
   organizations: []
     # - "my-org-1"
     # - "my-org-2"
-  
-  # Auto-creation settings for teams mode
-  auto_create_cost_centers: true  # Automatically create cost centers for teams
-  
-  # Cost center naming conventions (auto mode only):
-  # - Organization scope: [org team] {org-name}/{team-name}
-  # - Enterprise scope: [enterprise team] {team-name}
-  
+
+  auto_create_cost_centers: true
+
   # Full sync: remove users from cost centers when they're no longer in the team
-  remove_users_no_longer_in_teams: true  # Set to false to keep users in cost centers even after leaving teams
-  
+  remove_users_no_longer_in_teams: true
+
   # Manual team-to-cost-center mappings (only used when mode is 'manual')
-  # Format: "org/team-slug": "cost_center_id" or "cost_center_name" (if auto_create enabled)
   team_mappings: {}
     # "my-org/frontend-team": "CC-FRONTEND-001"
     # "my-org/backend-team": "CC-BACKEND-001"
-    # "other-org/devops-team": "Team: DevOps"  # Will be auto-created if auto_create is true
 
 # ========================================
 # Budget Configuration (Optional)
 # ========================================
 # Configure automatic budget creation for cost centers.
-# Requires GitHub Enterprise with Budgets API access.
 # Use with --create-budgets flag.
 budgets:
-  enabled: false  # Set to true to enable automatic budget creation
-  
-  # Product-specific budget configuration
-  # Supported products: copilot, actions, packages, codespaces
+  enabled: false
+
   products:
     copilot:
-      amount: 100      # Budget amount in USD
-      enabled: true    # Create Copilot PRU budgets
-    
+      amount: 100
+      enabled: true
+
     actions:
-      amount: 125      # Budget amount in USD  
-      enabled: true    # Create Actions budgets
-    
-    # Future products can be added here
+      amount: 125
+      enabled: true
+
+    # Future products
     # packages:
     #   amount: 50
-    #   enabled: false
-    # 
-    # codespaces:
-    #   amount: 200
     #   enabled: false

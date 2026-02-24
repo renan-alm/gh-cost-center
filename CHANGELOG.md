@@ -5,55 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2025-07-21
+
+### Changed — Complete Go Rewrite
+- **Full rewrite from Python to Go** — the tool is now a `gh` CLI extension (`gh-cost-center`)
+- Authentication via `gh auth login` (no more `GITHUB_TOKEN` env var)
+- Install with `gh extension install renan-alm/gh-cost-center`
+- Plan/Apply workflow: `gh cost-center assign --mode plan|apply`
+- Structured logging via `log/slog`
+- File-based cost center cache with 24 h TTL (`.cache/cost_centers.json`)
+- Cross-compiled release binaries via `gh-extension-precompile`
 
 ### Added
-- **Repository-Based Cost Center Assignment**: New mode for assigning repositories to cost centers based on custom properties
-  - Explicit mapping mode: Map custom property values to specific cost centers
-  - Works with any repository custom property (team, service, environment, etc.)
-  - Automatic cost center creation for new mappings
-  - Full pagination support for organizations with many repositories
-  - Comprehensive logging showing repository discovery, matching, and assignment
-- New module `repository_cost_center_manager.py` for repository-based assignment logic
-- New GitHub API methods for custom properties:
-  - `get_org_custom_properties()`: Fetch organization custom property schema
-  - `get_org_repositories_with_properties()`: List repositories with their property values (paginated)
-  - `get_all_org_repositories_with_properties()`: Automatic pagination wrapper
-  - `get_repository_custom_properties()`: Get properties for a specific repository
-  - `add_repositories_to_cost_center()`: Batch assign repositories to cost centers
-- Configuration support for repository mode in `config_manager.py`
-  - New `github.cost_centers.mode` setting (supports "users", "teams", or "repository")
-  - New `github.cost_centers.repository_config` section with validation
-  - Explicit mappings configuration with property name and value matching
-- Documentation for repository mode in README.md with examples
-- Detailed design document in `REPOSITORY_COST_CENTER_DESIGN.md`
-- **GitHub Enterprise Data Resident Support**: Full support for enterprises running on GitHub Enterprise Data Resident (GHE.com) with custom API endpoints
-- **Enhanced Budget System**: Product-agnostic budget creation with multi-product support
-  - `create_product_budget()`: Generic method for creating budgets for any product (Actions, Copilot, Packages, etc.)
-  - `check_cost_center_has_product_budget()`: Check for existing budgets before creation
-  - Configurable budget amounts (no longer hardcoded to $0)
-  - Support for both ProductPricing (Actions) and SkuPricing (Copilot) budget types
-  - Product registry system for easy extension to new products
-- **Budget Configuration System**: YAML-based budget configuration
-  - `budgets.enabled`: Global budget creation toggle
-  - `budgets.products`: Per-product configuration with amounts and enable/disable flags
-  - Support for Copilot PRU and Actions budgets with different default amounts
-  - Extensible design for future products (Packages, Codespaces, etc.)
-- Repository mode now supports budget creation with `--create-budgets` flag
-- New configuration option `github.api_base_url` in config files for custom API endpoints
-- New environment variable `GITHUB_API_BASE_URL` for custom API endpoint configuration
-- Automatic API URL validation with support for:
-  - Standard GitHub.com (`https://api.github.com`)
-  - GitHub Enterprise Data Resident (`https://api.{subdomain}.ghe.com`)
-  - GitHub Enterprise Server (`https://{hostname}/api/v3`)
-- Comprehensive logging to show which API endpoint is being used at startup
-- Updated documentation in README.md, config.example.yaml, and .env.example
+- `gh cost-center assign` — PRU, Teams, and Repository modes with `--teams` / `--repo` flags
+- `gh cost-center list-users` — list Copilot licence holders
+- `gh cost-center config` — show resolved configuration
+- `gh cost-center report` — summary report (supports `--teams`)
+- `gh cost-center cache` — `--stats`, `--clear`, `--cleanup`
+- `gh cost-center version` — print version
+- Budget creation for Copilot PRU and Actions (`--create-budgets`)
+- Cost center auto-creation (`--create-cost-centers`)
+- GHE Data Resident and GHES support via `api_base_url` config
+- Graceful shutdown with OS signal handling
+- CI workflow: `go build`, `go vet`, `go test -race`, `golangci-lint`
+- Release workflow: `gh-extension-precompile`
+- Dependabot configuration for Go modules
 
-### Changed
-- Updated `main.py` to support three operational modes (PRU-based, Teams-based, Repository-based)
-- Renamed "Two Operational Modes" to "Three Operational Modes" in documentation
-- `GitHubCopilotManager` now uses configurable API base URL instead of hardcoded value
-- URL validation and normalization in `ConfigManager` to ensure proper API endpoint formatting
+### Removed
+- All Python source code (`src/`, `main.py`, `requirements.txt`)
+- Docker artifacts (`Dockerfile`, `docker-compose.yml`)
+- Shell automation scripts (`automation/`)
+- Python CI/CD workflows (`cost-center-automation.yml`, `cost-center-sync-cached.yml`)
+- Legacy documentation (`REMOVED_USERS_FEATURE.md`, `TEAMS_INTEGRATION.md`, `TEAMS_QUICKSTART.md`, `CACHING_IMPLEMENTATION.md`, `BUDGET_IMPROVEMENTS.md`)
 
 ## [1.0.0] - 2024-09-25
 
