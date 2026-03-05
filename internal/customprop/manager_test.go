@@ -1,4 +1,4 @@
-package repository
+package customprop
 
 import (
 	"log/slog"
@@ -9,38 +9,37 @@ import (
 	"github.com/renan-alm/gh-cost-center/internal/github"
 )
 
-// newTestCustomPropertyManager creates a CustomPropertyManager with test defaults.
-func newTestCustomPropertyManager(costCenters []config.CustomPropertyCostCenter) *CustomPropertyManager {
+// newTestManager creates a Manager with test defaults.
+func newTestManager(costCenters []config.CustomPropCostCenter) *Manager {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := &config.Manager{
-		CustomPropertyCostCenters: costCenters,
-		BudgetsEnabled:            false,
+		CustomPropCostCenters: costCenters,
+		BudgetsEnabled:        false,
 	}
-	return &CustomPropertyManager{
+	return &Manager{
 		cfg:         cfg,
 		log:         logger,
 		costCenters: costCenters,
 	}
 }
 
-// --- NewCustomPropertyManager tests ---
+// --- NewManager tests ---
 
-func TestNewCustomPropertyManager_NoCostCenters(t *testing.T) {
+func TestNewManager_NoCostCenters(t *testing.T) {
 	cfg := &config.Manager{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	_, err := NewCustomPropertyManager(cfg, nil, logger)
+	_, err := NewManager(cfg, nil, logger)
 	if err == nil {
-		t.Fatal("expected error for empty CustomPropertyCostCenters")
+		t.Fatal("expected error for empty CustomPropCostCenters")
 	}
 }
 
-func TestNewCustomPropertyManager_Valid(t *testing.T) {
+func TestNewManager_Valid(t *testing.T) {
 	cfg := &config.Manager{
-		CustomPropertyCostCenters: []config.CustomPropertyCostCenter{
+		CustomPropCostCenters: []config.CustomPropCostCenter{
 			{
 				Name: "Backend",
-				Type: "custom-property",
 				Filters: []config.CustomPropertyFilter{
 					{Property: "team", Value: "backend"},
 				},
@@ -49,7 +48,7 @@ func TestNewCustomPropertyManager_Valid(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	mgr, err := NewCustomPropertyManager(cfg, nil, logger)
+	mgr, err := NewManager(cfg, nil, logger)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -60,11 +59,10 @@ func TestNewCustomPropertyManager_Valid(t *testing.T) {
 
 // --- ValidateConfiguration tests ---
 
-func TestValidateCustomPropertyManager_AllValid(t *testing.T) {
-	mgr := newTestCustomPropertyManager([]config.CustomPropertyCostCenter{
+func TestValidateConfiguration_AllValid(t *testing.T) {
+	mgr := newTestManager([]config.CustomPropCostCenter{
 		{
 			Name: "Backend",
-			Type: "custom-property",
 			Filters: []config.CustomPropertyFilter{
 				{Property: "team", Value: "backend"},
 				{Property: "env", Value: "prod"},
@@ -78,11 +76,10 @@ func TestValidateCustomPropertyManager_AllValid(t *testing.T) {
 	}
 }
 
-func TestValidateCustomPropertyManager_MissingName(t *testing.T) {
-	mgr := newTestCustomPropertyManager([]config.CustomPropertyCostCenter{
+func TestValidateConfiguration_MissingName(t *testing.T) {
+	mgr := newTestManager([]config.CustomPropCostCenter{
 		{
 			Name: "",
-			Type: "custom-property",
 			Filters: []config.CustomPropertyFilter{
 				{Property: "team", Value: "backend"},
 			},
@@ -95,28 +92,10 @@ func TestValidateCustomPropertyManager_MissingName(t *testing.T) {
 	}
 }
 
-func TestValidateCustomPropertyManager_WrongType(t *testing.T) {
-	mgr := newTestCustomPropertyManager([]config.CustomPropertyCostCenter{
-		{
-			Name: "Backend",
-			Type: "teams", // invalid
-			Filters: []config.CustomPropertyFilter{
-				{Property: "team", Value: "backend"},
-			},
-		},
-	})
-
-	issues := mgr.ValidateConfiguration()
-	if len(issues) == 0 {
-		t.Error("expected issue for wrong type")
-	}
-}
-
-func TestValidateCustomPropertyManager_NoFilters(t *testing.T) {
-	mgr := newTestCustomPropertyManager([]config.CustomPropertyCostCenter{
+func TestValidateConfiguration_NoFilters(t *testing.T) {
+	mgr := newTestManager([]config.CustomPropCostCenter{
 		{
 			Name:    "Backend",
-			Type:    "custom-property",
 			Filters: nil,
 		},
 	})
@@ -127,11 +106,10 @@ func TestValidateCustomPropertyManager_NoFilters(t *testing.T) {
 	}
 }
 
-func TestValidateCustomPropertyManager_MissingFilterProperty(t *testing.T) {
-	mgr := newTestCustomPropertyManager([]config.CustomPropertyCostCenter{
+func TestValidateConfiguration_MissingFilterProperty(t *testing.T) {
+	mgr := newTestManager([]config.CustomPropCostCenter{
 		{
 			Name: "Backend",
-			Type: "custom-property",
 			Filters: []config.CustomPropertyFilter{
 				{Property: "", Value: "backend"},
 			},
@@ -144,11 +122,10 @@ func TestValidateCustomPropertyManager_MissingFilterProperty(t *testing.T) {
 	}
 }
 
-func TestValidateCustomPropertyManager_MissingFilterValue(t *testing.T) {
-	mgr := newTestCustomPropertyManager([]config.CustomPropertyCostCenter{
+func TestValidateConfiguration_MissingFilterValue(t *testing.T) {
+	mgr := newTestManager([]config.CustomPropCostCenter{
 		{
 			Name: "Backend",
-			Type: "custom-property",
 			Filters: []config.CustomPropertyFilter{
 				{Property: "team", Value: ""},
 			},
@@ -161,18 +138,16 @@ func TestValidateCustomPropertyManager_MissingFilterValue(t *testing.T) {
 	}
 }
 
-func TestValidateCustomPropertyManager_DuplicateName(t *testing.T) {
-	mgr := newTestCustomPropertyManager([]config.CustomPropertyCostCenter{
+func TestValidateConfiguration_DuplicateName(t *testing.T) {
+	mgr := newTestManager([]config.CustomPropCostCenter{
 		{
 			Name: "Backend",
-			Type: "custom-property",
 			Filters: []config.CustomPropertyFilter{
 				{Property: "team", Value: "backend"},
 			},
 		},
 		{
 			Name: "Backend", // duplicate
-			Type: "custom-property",
 			Filters: []config.CustomPropertyFilter{
 				{Property: "team", Value: "backend-v2"},
 			},
@@ -204,7 +179,6 @@ func TestFindReposMatchingAllFilters_SingleFilter(t *testing.T) {
 			},
 		},
 	}
-
 	filters := []config.CustomPropertyFilter{
 		{Property: "team", Value: "backend"},
 	}
@@ -233,19 +207,18 @@ func TestFindReposMatchingAllFilters_ANDLogic(t *testing.T) {
 			RepositoryFullName: "org/repo2",
 			Properties: []github.Property{
 				{PropertyName: "team", Value: "backend"},
-				{PropertyName: "env", Value: "staging"}, // does not match second filter
+				{PropertyName: "env", Value: "staging"},
 			},
 		},
 		{
 			RepositoryName:     "repo3",
 			RepositoryFullName: "org/repo3",
 			Properties: []github.Property{
-				{PropertyName: "team", Value: "frontend"}, // does not match first filter
+				{PropertyName: "team", Value: "frontend"},
 				{PropertyName: "env", Value: "prod"},
 			},
 		},
 	}
-
 	filters := []config.CustomPropertyFilter{
 		{Property: "team", Value: "backend"},
 		{Property: "env", Value: "prod"},
@@ -277,11 +250,9 @@ func TestFindReposMatchingAllFilters_ThreeFilters(t *testing.T) {
 			Properties: []github.Property{
 				{PropertyName: "team", Value: "backend"},
 				{PropertyName: "env", Value: "prod"},
-				// missing cost-center-id
 			},
 		},
 	}
-
 	filters := []config.CustomPropertyFilter{
 		{Property: "team", Value: "backend"},
 		{Property: "env", Value: "prod"},
@@ -307,7 +278,6 @@ func TestFindReposMatchingAllFilters_NoMatch(t *testing.T) {
 			},
 		},
 	}
-
 	filters := []config.CustomPropertyFilter{
 		{Property: "team", Value: "frontend"},
 	}
@@ -351,11 +321,9 @@ func TestFindReposMatchingAllFilters_MissingProperty(t *testing.T) {
 			RepositoryFullName: "org/repo1",
 			Properties: []github.Property{
 				{PropertyName: "team", Value: "backend"},
-				// "env" property is absent
 			},
 		},
 	}
-
 	filters := []config.CustomPropertyFilter{
 		{Property: "team", Value: "backend"},
 		{Property: "env", Value: "prod"},
@@ -378,7 +346,6 @@ func TestFindReposMatchingAllFilters_ArrayValueMatch(t *testing.T) {
 			},
 		},
 	}
-
 	filters := []config.CustomPropertyFilter{
 		{Property: "tags", Value: "backend"},
 		{Property: "env", Value: "prod"},
@@ -403,6 +370,7 @@ func TestRepoMatchesAllFilters_AllMatch(t *testing.T) {
 		{Property: "team", Value: "backend"},
 		{Property: "env", Value: "prod"},
 	}
+
 	if !repoMatchesAllFilters(repo, filters) {
 		t.Error("expected all filters to match")
 	}
@@ -416,8 +384,9 @@ func TestRepoMatchesAllFilters_PartialMatch(t *testing.T) {
 	}
 	filters := []config.CustomPropertyFilter{
 		{Property: "team", Value: "backend"},
-		{Property: "env", Value: "prod"}, // missing
+		{Property: "env", Value: "prod"},
 	}
+
 	if repoMatchesAllFilters(repo, filters) {
 		t.Error("expected false when a filter is not satisfied")
 	}
@@ -428,19 +397,20 @@ func TestRepoMatchesAllFilters_NoProperties(t *testing.T) {
 	filters := []config.CustomPropertyFilter{
 		{Property: "team", Value: "backend"},
 	}
+
 	if repoMatchesAllFilters(repo, filters) {
 		t.Error("expected false for repo with no properties")
 	}
 }
 
-// --- CustomPropertySummary.Print test ---
+// --- Summary.Print test ---
 
-func TestCustomPropertySummaryPrint(t *testing.T) {
-	s := &CustomPropertySummary{
+func TestSummaryPrint(t *testing.T) {
+	s := &Summary{
 		TotalRepos: 20,
 		TotalCCs:   2,
 		AppliedCCs: 1,
-		Results: []CustomPropertyResult{
+		Results: []Result{
 			{
 				CostCenter: "Backend",
 				Filters: []config.CustomPropertyFilter{
@@ -469,11 +439,10 @@ func TestCustomPropertySummaryPrint(t *testing.T) {
 
 // --- PrintConfigSummary test ---
 
-func TestPrintCustomPropertyConfigSummary(t *testing.T) {
-	mgr := newTestCustomPropertyManager([]config.CustomPropertyCostCenter{
+func TestPrintConfigSummary(t *testing.T) {
+	mgr := newTestManager([]config.CustomPropCostCenter{
 		{
 			Name: "Backend",
-			Type: "custom-property",
 			Filters: []config.CustomPropertyFilter{
 				{Property: "team", Value: "backend"},
 				{Property: "cost-center-id", Value: "CC-1234"},
@@ -483,4 +452,31 @@ func TestPrintCustomPropertyConfigSummary(t *testing.T) {
 
 	// Verify it does not panic.
 	mgr.PrintConfigSummary("test-org")
+}
+
+// --- matchesValue tests ---
+
+func TestMatchesValue_String(t *testing.T) {
+	if !matchesValue("backend", "backend") {
+		t.Error("expected string match")
+	}
+	if matchesValue("frontend", "backend") {
+		t.Error("expected no match for different string")
+	}
+}
+
+func TestMatchesValue_Array(t *testing.T) {
+	arr := []any{"go", "backend", "api"}
+	if !matchesValue(arr, "backend") {
+		t.Error("expected array element match")
+	}
+	if matchesValue(arr, "frontend") {
+		t.Error("expected no match for missing element")
+	}
+}
+
+func TestMatchesValue_OtherType(t *testing.T) {
+	if matchesValue(42, "42") {
+		t.Error("expected no match for non-string/non-array type")
+	}
 }

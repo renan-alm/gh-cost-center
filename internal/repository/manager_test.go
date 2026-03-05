@@ -13,9 +13,7 @@ import (
 func newTestManager(mappings []config.ExplicitMapping) *Manager {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := &config.Manager{
-		RepositoryConfig: &config.RepositoryConfig{
-			ExplicitMappings: mappings,
-		},
+		ReposMappings:  mappings,
 		BudgetsEnabled: false,
 	}
 	return &Manager{
@@ -33,15 +31,13 @@ func TestNewManager_NilConfig(t *testing.T) {
 
 	_, err := NewManager(cfg, nil, logger)
 	if err == nil {
-		t.Fatal("expected error for nil RepositoryConfig")
+		t.Fatal("expected error for empty ReposMappings")
 	}
 }
 
 func TestNewManager_NoMappings(t *testing.T) {
 	cfg := &config.Manager{
-		RepositoryConfig: &config.RepositoryConfig{
-			ExplicitMappings: nil,
-		},
+		ReposMappings: nil,
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -53,10 +49,8 @@ func TestNewManager_NoMappings(t *testing.T) {
 
 func TestNewManager_Valid(t *testing.T) {
 	cfg := &config.Manager{
-		RepositoryConfig: &config.RepositoryConfig{
-			ExplicitMappings: []config.ExplicitMapping{
-				{CostCenter: "cc1", PropertyName: "team", PropertyValues: []string{"eng"}},
-			},
+		ReposMappings: []config.ExplicitMapping{
+			{CostCenter: "cc1", PropertyName: "team", PropertyValues: []string{"eng"}},
 		},
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))

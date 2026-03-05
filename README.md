@@ -10,9 +10,10 @@ A [GitHub CLI](https://cli.github.com/) extension to automate [GitHub Cost Cente
 
 Originally based on [GitHub Cost Center Automation](https://github.com/github/cost-center-automation) project.
 
-- **PRU-Based Mode**: Simple two-tier model (PRU overages allowed / not allowed)
-- **Teams-Based Mode**: Automatic assignment based on GitHub team membership
-- **Repository-Based Mode**: Assign repositories to cost centers via custom properties
+- **Users (PRU) Mode**: Simple two-tier model (PRU overages allowed / not allowed)
+- **Teams Mode**: Automatic assignment based on GitHub team membership
+- **Repos Mode**: Assign repositories to cost centers via explicit property→CC mappings (OR logic)
+- **Custom-Prop Mode**: Multi-filter cost centers using AND logic across custom properties
 - **Budget Creation**: Automatically create Copilot PRU and Actions budgets
 
 ## Installation
@@ -40,18 +41,14 @@ gh cost-center assign --mode apply --yes
 
 ### Assign Cost Centers
 
+The active mode is set via `cost_center.mode` in your config YAML.
+
 ```bash
-# PRU-based (default)
+# Preview assignments (any mode — reads from config)
 gh cost-center assign --mode plan
+
+# Apply assignments
 gh cost-center assign --mode apply --yes
-
-# Teams-based
-gh cost-center assign --teams --mode plan
-gh cost-center assign --teams --mode apply --yes
-
-# Repository-based
-gh cost-center assign --repo --mode plan
-gh cost-center assign --repo --mode apply --yes
 
 # Auto-create cost centers and budgets
 gh cost-center assign --mode apply --yes --create-cost-centers --create-budgets
@@ -68,7 +65,6 @@ gh cost-center list-users
 
 # Generate summary report
 gh cost-center report
-gh cost-center report --teams
 
 # Cache management
 gh cost-center cache --stats
@@ -114,56 +110,82 @@ cp config/config.example.yaml config/config.yaml
 
 Run `gh cost-center config` to verify the resolved values.
 
-### PRU-Based Mode
+### Users (PRU) Mode
 
 ```yaml
 github:
   enterprise: "your-enterprise"
 
-cost_centers:
-  auto_create: true
-  no_prus_cost_center_name: "00 - No PRU overages"
-  prus_allowed_cost_center_name: "01 - PRU overages allowed"
-  prus_exception_users:
-    - "alice"
-    - "bob"
+cost_center:
+  mode: "users"
+  users:
+    auto_create: true
+    no_prus_cost_center_name: "00 - No PRU overages"
+    prus_allowed_cost_center_name: "01 - PRU overages allowed"
+    exception_users:
+      - "alice"
+      - "bob"
 ```
 
-### Teams-Based Mode
+### Teams Mode
 
 ```yaml
-teams:
-  enabled: true
-  scope: "organization"   # or "enterprise"
-  mode: "auto"             # one cost center per team
+github:
+  enterprise: "your-enterprise"
   organizations:
     - "your-org"
-  auto_create_cost_centers: true
-  remove_users_no_longer_in_teams: true
+
+cost_center:
+  mode: "teams"
+  teams:
+    scope: "organization"   # or "enterprise"
+    strategy: "auto"         # one cost center per team
+    auto_create: true
+    remove_unmatched_users: true
 ```
 
 Cost center naming:
 - Organization scope: `[org team] {org}/{team}`
 - Enterprise scope: `[enterprise team] {team}`
 
-### Repository-Based Mode
+### Repos Mode
 
 ```yaml
 github:
-  cost_centers:
-    mode: "repository"
-    repository_config:
-      explicit_mappings:
-        - cost_center: "Platform Engineering"
-          property_name: "team"
-          property_values: ["platform", "infrastructure"]
-        - cost_center: "Production Services"
-          property_name: "environment"
-          property_values: ["production"]
-
-teams:
+  enterprise: "your-enterprise"
   organizations:
-    - "your-org"   # required for repository mode
+    - "your-org"
+
+cost_center:
+  mode: "repos"
+  repos:
+    mappings:
+      - cost_center: "Platform Engineering"
+        property_name: "team"
+        property_values: ["platform", "infrastructure"]
+      - cost_center: "Production Services"
+        property_name: "environment"
+        property_values: ["production"]
+```
+
+### Custom-Prop Mode
+
+```yaml
+github:
+  enterprise: "your-enterprise"
+  organizations:
+    - "your-org"
+
+cost_center:
+  mode: "custom-prop"
+  custom_prop:
+    cost_centers:
+      - name: "Backend Engineering"
+        filters:
+          - property: "team"
+            value: "backend"
+          - property: "cost-center-id"
+            value: "CC-1234"
 ```
 
 ### Budget Configuration

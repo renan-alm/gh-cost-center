@@ -3,31 +3,52 @@ package config
 
 // Config is the top-level configuration structure that mirrors the YAML file.
 type Config struct {
-	GitHub                    GitHubConfig               `yaml:"github"`
-	Logging                   LoggingConfig              `yaml:"logging"`
-	CostCenters               CostCentersConfig          `yaml:"cost_centers"`
-	Teams                     TeamsConfig                `yaml:"teams"`
-	Budgets                   BudgetsConfig              `yaml:"budgets"`
-	ExportDir                 string                     `yaml:"export_dir"`
-	CustomPropertyCostCenters []CustomPropertyCostCenter `yaml:"cost-centers"`
+	GitHub     GitHubConfig     `yaml:"github"`
+	CostCenter CostCenterConfig `yaml:"cost_center"`
+	Budgets    BudgetsConfig    `yaml:"budgets"`
+	Logging    LoggingConfig    `yaml:"logging"`
+	ExportDir  string           `yaml:"export_dir"`
 }
 
 // GitHubConfig holds GitHub-related settings.
 type GitHubConfig struct {
-	Enterprise  string         `yaml:"enterprise"`
-	APIBaseURL  string         `yaml:"api_base_url"`
-	CostCenters CostCenterMode `yaml:"cost_centers"`
+	Enterprise    string   `yaml:"enterprise"`
+	APIBaseURL    string   `yaml:"api_base_url"`
+	Organizations []string `yaml:"organizations"`
 }
 
-// CostCenterMode selects the assignment mode and holds per-mode config.
-type CostCenterMode struct {
-	Mode             string           `yaml:"mode"` // "users", "teams", or "repository"
-	RepositoryConfig RepositoryConfig `yaml:"repository_config"`
+// CostCenterConfig holds the mode selector and per-mode settings.
+type CostCenterConfig struct {
+	Mode       string           `yaml:"mode"` // "users", "teams", "repos", or "custom-prop"
+	Users      UsersConfig      `yaml:"users"`
+	Teams      TeamsConfig      `yaml:"teams"`
+	Repos      ReposConfig      `yaml:"repos"`
+	CustomProp CustomPropConfig `yaml:"custom_prop"`
 }
 
-// RepositoryConfig configures repository-based cost center assignment.
-type RepositoryConfig struct {
-	ExplicitMappings []ExplicitMapping `yaml:"explicit_mappings"`
+// UsersConfig holds PRU-based cost center settings.
+type UsersConfig struct {
+	NoPRUsCostCenterID        string   `yaml:"no_prus_cost_center_id"`
+	PRUsAllowedCostCenterID   string   `yaml:"prus_allowed_cost_center_id"`
+	ExceptionUsers            []string `yaml:"exception_users"`
+	AutoCreate                bool     `yaml:"auto_create"`
+	NoPRUsCostCenterName      string   `yaml:"no_prus_cost_center_name"`
+	PRUsAllowedCostCenterName string   `yaml:"prus_allowed_cost_center_name"`
+	EnableIncremental         bool     `yaml:"enable_incremental"`
+}
+
+// TeamsConfig holds teams-based cost center settings.
+type TeamsConfig struct {
+	Scope                string            `yaml:"scope"`    // "organization" or "enterprise"
+	Strategy             string            `yaml:"strategy"` // "auto" or "manual"
+	AutoCreate           bool              `yaml:"auto_create"`
+	RemoveUnmatchedUsers bool              `yaml:"remove_unmatched_users"`
+	Mappings             map[string]string `yaml:"mappings"` // "org/team-slug" -> "cost-center-name"
+}
+
+// ReposConfig holds repository-based (explicit OR-mapping) cost center settings.
+type ReposConfig struct {
+	Mappings []ExplicitMapping `yaml:"mappings"`
 }
 
 // ExplicitMapping maps a custom-property value set to a cost center.
@@ -37,13 +58,17 @@ type ExplicitMapping struct {
 	PropertyValues []string `yaml:"property_values"`
 }
 
-// CustomPropertyCostCenter defines a cost center discovered via GitHub custom
-// property filters.  A repository is included in the cost center when it
-// satisfies ALL filters (AND logic).  Use separate cost-center entries when
-// OR logic across different property combinations is required.
-type CustomPropertyCostCenter struct {
+// CustomPropConfig holds AND-filter custom-property cost center definitions.
+type CustomPropConfig struct {
+	CostCenters []CustomPropCostCenter `yaml:"cost_centers"`
+}
+
+// CustomPropCostCenter defines a cost center discovered via GitHub custom
+// property filters.  A repository is included when it satisfies ALL filters
+// (AND logic).  Use separate entries for OR logic across different property
+// combinations.
+type CustomPropCostCenter struct {
 	Name    string                 `yaml:"name"`
-	Type    string                 `yaml:"type"` // must be "custom-property"
 	Filters []CustomPropertyFilter `yaml:"filters"`
 }
 
@@ -58,43 +83,6 @@ type CustomPropertyFilter struct {
 type LoggingConfig struct {
 	Level string `yaml:"level"`
 	File  string `yaml:"file"`
-}
-
-// CostCentersConfig holds PRU-tier cost center settings.
-type CostCentersConfig struct {
-	// Current keys
-	NoPRUsCostCenterID      string   `yaml:"no_prus_cost_center_id"`
-	PRUsAllowedCostCenterID string   `yaml:"prus_allowed_cost_center_id"`
-	PRUsExceptionUsers      []string `yaml:"prus_exception_users"`
-
-	// Auto-creation
-	AutoCreate                bool   `yaml:"auto_create"`
-	NoPRUsCostCenterName      string `yaml:"no_prus_cost_center_name"`
-	PRUsAllowedCostCenterName string `yaml:"prus_allowed_cost_center_name"`
-
-	// Incremental processing
-	EnableIncremental bool `yaml:"enable_incremental"`
-
-	// Backward-compatible keys (old names)
-	NoPRUsCostCenterOld      string `yaml:"no_prus_cost_center"`
-	PRUsAllowedCostCenterOld string `yaml:"prus_allowed_cost_center"`
-	NoPRUNameOld             string `yaml:"no_pru_name"`
-	PRUAllowedNameOld        string `yaml:"pru_allowed_name"`
-}
-
-// TeamsConfig holds teams-integration settings.
-type TeamsConfig struct {
-	Enabled       bool              `yaml:"enabled"`
-	Scope         string            `yaml:"scope"` // "organization" or "enterprise"
-	Mode          string            `yaml:"mode"`  // "auto" or "manual"
-	Organizations []string          `yaml:"organizations"`
-	AutoCreate    bool              `yaml:"auto_create_cost_centers"`
-	TeamMappings  map[string]string `yaml:"team_mappings"`
-
-	// Current key
-	RemoveUsersNoLongerInTeams *bool `yaml:"remove_users_no_longer_in_teams"`
-	// Backward-compatible key (old name)
-	RemoveOrphanedUsersOld *bool `yaml:"remove_orphaned_users"`
 }
 
 // BudgetsConfig holds budget auto-creation settings.

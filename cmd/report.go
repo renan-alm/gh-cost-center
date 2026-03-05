@@ -11,30 +11,25 @@ import (
 	"github.com/renan-alm/gh-cost-center/internal/teams"
 )
 
-var reportTeams bool
-
 var reportCmd = &cobra.Command{
 	Use:   "report",
 	Short: "Generate cost center summary report",
 	Long: `Generate and display a cost center summary report.
 
 Shows per-cost-center user counts and assignment breakdown.
-Use --teams for teams-aware reporting.
+The report type is determined by cost_center.mode in config.yaml.
 
 Examples:
-  gh cost-center report
-  gh cost-center report --teams`,
+  gh cost-center report`,
 	RunE: runReport,
 }
 
 func init() {
-	reportCmd.Flags().BoolVar(&reportTeams, "teams", false, "generate teams-aware report")
-
 	rootCmd.AddCommand(reportCmd)
 }
 
 func runReport(_ *cobra.Command, _ []string) error {
-	if reportTeams {
+	if cfgManager.CostCenterMode == "teams" {
 		return runTeamsReport()
 	}
 

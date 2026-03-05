@@ -14,11 +14,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Default values mirroring the Python implementation.
+// Default values.
 const (
 	DefaultCostCenterMode    = "users"
+	DefaultTeamsStrategy     = "auto"
 	DefaultTeamsScope        = "enterprise"
-	DefaultTeamsMode         = "auto"
 	DefaultLogLevel          = "INFO"
 	DefaultExportDir         = "exports"
 	DefaultNoPRUsCCID        = "CC-001-NO-PRUS"
@@ -30,16 +30,19 @@ const (
 	timestampFileName = ".last_run_timestamp"
 )
 
+// Valid mode values.
+var validModes = map[string]bool{
+	"users":       true,
+	"teams":       true,
+	"repos":       true,
+	"custom-prop": true,
+}
+
 // Placeholder values that indicate the config has not been customised.
 var placeholderEnterpriseValues = map[string]bool{
 	"":                             true,
 	"REPLACE_WITH_ENTERPRISE_SLUG": true,
 	"your_enterprise_name":         true,
-}
-
-var placeholderCCValues = map[string][]string{
-	"NoPRUsCostCenterID":      {"REPLACE_WITH_NO_PRUS_COST_CENTER_ID", DefaultNoPRUsCCID},
-	"PRUsAllowedCostCenterID": {"REPLACE_WITH_PRUS_ALLOWED_COST_CENTER_ID", DefaultPRUsAllowedCCID},
 }
 
 // Manager loads, validates, and exposes configuration.
@@ -48,38 +51,52 @@ type Manager struct {
 	path string
 	log  *slog.Logger
 
-	// Resolved values after applying fallback chains and env overrides.
-	Enterprise                      string
-	APIBaseURL                      string
-	CostCenterMode                  string
-	NoPRUsCostCenterID              string
-	PRUsAllowedCostCenterID         string
-	PRUsExceptionUsers              []string
-	AutoCreate                      bool
-	NoPRUsCostCenterName            string
-	PRUsAllowedCostCenterName       string
-	EnableIncremental               bool
-	TeamsEnabled                    bool
-	TeamsScope                      string
-	TeamsMode                       string
-	TeamsOrganizations              []string
-	TeamsAutoCreate                 bool
-	TeamsMappings                   map[string]string
-	TeamsRemoveUsersNoLongerInTeams bool
-	BudgetsEnabled                  bool
-	BudgetProducts                  map[string]ProductBudget
-	ExportDir                       string
-	LogLevel                        string
-	LogFile                         string
-	RepositoryConfig                *RepositoryConfig
-	CustomPropertyCostCenters       []CustomPropertyCostCenter
-	Token                           string // Explicit token from --token flag
+	// Resolved values after applying env overrides and defaults.
+	Enterprise    string
+	APIBaseURL    string
+	Organizations []string
+
+	// Cost center mode.
+	CostCenterMode string
+
+	// Users (PRU) mode fields.
+	NoPRUsCostCenterID        string
+	PRUsAllowedCostCenterID   string
+	PRUsExceptionUsers        []string
+	AutoCreate                bool
+	NoPRUsCostCenterName      string
+	PRUsAllowedCostCenterName string
+	EnableIncremental         bool
+
+	// Teams mode fields.
+	TeamsScope                string
+	TeamsStrategy             string
+	TeamsAutoCreate           bool
+	TeamsRemoveUnmatchedUsers bool
+	TeamsMappings             map[string]string
+
+	// Repos mode fields.
+	ReposMappings []ExplicitMapping
+
+	// Custom-prop mode fields.
+	CustomPropCostCenters []CustomPropCostCenter
+
+	// Budgets.
+	BudgetsEnabled bool
+	BudgetProducts map[string]ProductBudget
+
+	// Logging & export.
+	ExportDir string
+	LogLevel  string
+	LogFile   string
+
+	// Token from --token flag.
+	Token string
 
 	timestampFile string
 }
 
-// Load reads the YAML config at path, applies env-var overrides, backward-
-// compatible fallback chains, and validates required fields.
+// Load reads the YAML config at path, applies env-var overrides, and validates.
 func Load(path string, logger *slog.Logger) (*Manager, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -96,7 +113,6 @@ func Load(path string, logger *slog.Logger) (*Manager, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			logger.Warn("Config file not found, using defaults", "path", path)
-			// Continue with zero-value Config; defaults are applied below.
 		} else {
 			return nil, fmt.Errorf("reading config file: %w", err)
 		}
@@ -114,10 +130,7 @@ func Load(path string, logger *slog.Logger) (*Manager, error) {
 }
 
 // loadDotEnv loads .env files if present, without overriding already-exported
-// environment variables. Precedence remains:
-//  1. existing process environment
-//  2. .env file values
-//  3. config YAML/defaults
+// environment variables.
 func loadDotEnv(configPath string, logger *slog.Logger) {
 	tryLoad := func(envPath string) bool {
 		if envPath == "" {
@@ -134,12 +147,9 @@ func loadDotEnv(configPath string, logger *slog.Logger) {
 		return true
 	}
 
-	// Try current working directory first (common local-dev pattern).
 	if tryLoad(".env") {
 		return
 	}
-
-	// Then try alongside config file and one level up (e.g. config/config.yaml -> .env at repo root).
 	configDir := filepath.Dir(configPath)
 	if tryLoad(filepath.Join(configDir, ".env")) {
 		return
@@ -152,12 +162,11 @@ func (m *Manager) Raw() *Config {
 	return &m.cfg
 }
 
-// resolve applies env-var overrides, fallbacks, defaults, and validation.
+// resolve applies env-var overrides, defaults, and validation.
 func (m *Manager) resolve() error {
 	// --- Enterprise ---
 	m.Enterprise = envOrFallback("GITHUB_ENTERPRISE", m.cfg.GitHub.Enterprise)
 	if placeholderEnterpriseValues[m.Enterprise] {
-		// Re-check env explicitly in case YAML had a placeholder.
 		if v := os.Getenv("GITHUB_ENTERPRISE"); v != "" && !placeholderEnterpriseValues[v] {
 			m.Enterprise = v
 		} else {
@@ -176,61 +185,37 @@ func (m *Manager) resolve() error {
 	}
 	m.APIBaseURL = apiURL
 
+	// --- Organizations ---
+	m.Organizations = m.cfg.GitHub.Organizations
+	if m.Organizations == nil {
+		m.Organizations = []string{}
+	}
+
 	// --- Cost center mode ---
-	m.CostCenterMode = defaultString(m.cfg.GitHub.CostCenters.Mode, DefaultCostCenterMode)
+	m.CostCenterMode = defaultString(m.cfg.CostCenter.Mode, DefaultCostCenterMode)
+	if !validModes[m.CostCenterMode] {
+		return fmt.Errorf("invalid cost_center.mode %q: must be one of: users, teams, repos, custom-prop", m.CostCenterMode)
+	}
 
-	// --- Repository config (only when mode is "repository") ---
-	if m.CostCenterMode == "repository" {
-		rc := m.cfg.GitHub.CostCenters.RepositoryConfig
-		if err := validateRepositoryConfig(&rc); err != nil {
+	// --- Validate and resolve per-mode settings ---
+	switch m.CostCenterMode {
+	case "users":
+		if err := m.resolveUsersMode(); err != nil {
 			return err
 		}
-		m.RepositoryConfig = &rc
-		m.log.Info("Repository mode enabled", "mappings", len(rc.ExplicitMappings))
-	}
-
-	// --- Custom-property cost centers (independent of mode) ---
-	if len(m.cfg.CustomPropertyCostCenters) > 0 {
-		if err := validateCustomPropertyCostCenters(m.cfg.CustomPropertyCostCenters); err != nil {
+	case "teams":
+		if err := m.resolveTeamsMode(); err != nil {
 			return err
 		}
-		m.CustomPropertyCostCenters = m.cfg.CustomPropertyCostCenters
-		m.log.Info("Custom-property cost centers configured",
-			"count", len(m.CustomPropertyCostCenters))
+	case "repos":
+		if err := m.resolveReposMode(); err != nil {
+			return err
+		}
+	case "custom-prop":
+		if err := m.resolveCustomPropMode(); err != nil {
+			return err
+		}
 	}
-
-	// --- Cost centers (PRU-tier) with backward-compatible fallback chains ---
-	cc := m.cfg.CostCenters
-
-	m.NoPRUsCostCenterID = firstNonEmpty(cc.NoPRUsCostCenterID, cc.NoPRUsCostCenterOld, DefaultNoPRUsCCID)
-	m.PRUsAllowedCostCenterID = firstNonEmpty(cc.PRUsAllowedCostCenterID, cc.PRUsAllowedCostCenterOld, DefaultPRUsAllowedCCID)
-	m.NoPRUsCostCenterName = firstNonEmpty(cc.NoPRUsCostCenterName, cc.NoPRUNameOld, DefaultNoPRUsCCName)
-	m.PRUsAllowedCostCenterName = firstNonEmpty(cc.PRUsAllowedCostCenterName, cc.PRUAllowedNameOld, DefaultPRUsAllowedCCName)
-
-	m.PRUsExceptionUsers = cc.PRUsExceptionUsers
-	if m.PRUsExceptionUsers == nil {
-		m.PRUsExceptionUsers = []string{}
-	}
-
-	m.AutoCreate = cc.AutoCreate
-	m.EnableIncremental = cc.EnableIncremental
-
-	// --- Teams ---
-	t := m.cfg.Teams
-	m.TeamsEnabled = t.Enabled
-	m.TeamsScope = defaultString(t.Scope, DefaultTeamsScope)
-	m.TeamsMode = defaultString(t.Mode, DefaultTeamsMode)
-	m.TeamsOrganizations = t.Organizations
-	if m.TeamsOrganizations == nil {
-		m.TeamsOrganizations = []string{}
-	}
-	m.TeamsAutoCreate = t.AutoCreate
-	m.TeamsMappings = t.TeamMappings
-	if m.TeamsMappings == nil {
-		m.TeamsMappings = map[string]string{}
-	}
-	// Backward-compatible fallback: remove_users_no_longer_in_teams → remove_orphaned_users
-	m.TeamsRemoveUsersNoLongerInTeams = boolPtrDefault(t.RemoveUsersNoLongerInTeams, boolPtrDefault(t.RemoveOrphanedUsersOld, true))
 
 	// --- Budgets ---
 	b := m.cfg.Budgets
@@ -254,33 +239,112 @@ func (m *Manager) resolve() error {
 	return nil
 }
 
+// resolveUsersMode resolves PRU-based (users) mode settings.
+func (m *Manager) resolveUsersMode() error {
+	u := m.cfg.CostCenter.Users
+
+	m.NoPRUsCostCenterID = defaultString(u.NoPRUsCostCenterID, DefaultNoPRUsCCID)
+	m.PRUsAllowedCostCenterID = defaultString(u.PRUsAllowedCostCenterID, DefaultPRUsAllowedCCID)
+	m.NoPRUsCostCenterName = defaultString(u.NoPRUsCostCenterName, DefaultNoPRUsCCName)
+	m.PRUsAllowedCostCenterName = defaultString(u.PRUsAllowedCostCenterName, DefaultPRUsAllowedCCName)
+
+	m.PRUsExceptionUsers = u.ExceptionUsers
+	if m.PRUsExceptionUsers == nil {
+		m.PRUsExceptionUsers = []string{}
+	}
+
+	m.AutoCreate = u.AutoCreate
+	m.EnableIncremental = u.EnableIncremental
+
+	m.log.Info("Users (PRU) mode enabled",
+		"exception_users", len(m.PRUsExceptionUsers),
+		"auto_create", m.AutoCreate)
+	return nil
+}
+
+// resolveTeamsMode resolves teams-based mode settings.
+func (m *Manager) resolveTeamsMode() error {
+	t := m.cfg.CostCenter.Teams
+
+	m.TeamsScope = defaultString(t.Scope, DefaultTeamsScope)
+	m.TeamsStrategy = defaultString(t.Strategy, DefaultTeamsStrategy)
+	m.TeamsAutoCreate = t.AutoCreate
+	m.TeamsRemoveUnmatchedUsers = t.RemoveUnmatchedUsers
+
+	m.TeamsMappings = t.Mappings
+	if m.TeamsMappings == nil {
+		m.TeamsMappings = map[string]string{}
+	}
+
+	// Validate: organization scope requires organizations
+	if m.TeamsScope == "organization" && len(m.Organizations) == 0 {
+		return fmt.Errorf("teams mode with scope 'organization' requires github.organizations to be configured")
+	}
+
+	if m.TeamsStrategy != "auto" && m.TeamsStrategy != "manual" {
+		return fmt.Errorf("invalid cost_center.teams.strategy %q: must be 'auto' or 'manual'", m.TeamsStrategy)
+	}
+
+	m.log.Info("Teams mode enabled",
+		"scope", m.TeamsScope,
+		"strategy", m.TeamsStrategy,
+		"auto_create", m.TeamsAutoCreate)
+	return nil
+}
+
+// resolveReposMode resolves repository (explicit mapping) mode settings.
+func (m *Manager) resolveReposMode() error {
+	if len(m.Organizations) == 0 {
+		return fmt.Errorf("repos mode requires github.organizations to be configured")
+	}
+
+	r := m.cfg.CostCenter.Repos
+	if len(r.Mappings) == 0 {
+		return fmt.Errorf("repos mode requires at least one mapping in cost_center.repos.mappings")
+	}
+
+	if err := validateExplicitMappings(r.Mappings); err != nil {
+		return err
+	}
+
+	m.ReposMappings = r.Mappings
+	m.log.Info("Repos mode enabled", "mappings", len(r.Mappings))
+	return nil
+}
+
+// resolveCustomPropMode resolves custom-property mode settings.
+func (m *Manager) resolveCustomPropMode() error {
+	if len(m.Organizations) == 0 {
+		return fmt.Errorf("custom-prop mode requires github.organizations to be configured")
+	}
+
+	cp := m.cfg.CostCenter.CustomProp
+	if len(cp.CostCenters) == 0 {
+		return fmt.Errorf("custom-prop mode requires at least one entry in cost_center.custom_prop.cost_centers")
+	}
+
+	if err := validateCustomPropCostCenters(cp.CostCenters); err != nil {
+		return err
+	}
+
+	m.CustomPropCostCenters = cp.CostCenters
+	m.log.Info("Custom-prop mode enabled", "cost_centers", len(cp.CostCenters))
+	return nil
+}
+
 // EnableAutoCreation turns on auto-creation mode at runtime (--create-cost-centers).
 func (m *Manager) EnableAutoCreation() {
 	m.AutoCreate = true
 }
 
-// CheckConfigWarnings logs warnings for placeholder values still present.
+// CheckConfigWarnings logs warnings for the users (PRU) mode.
 func (m *Manager) CheckConfigWarnings() {
+	if m.CostCenterMode != "users" {
+		return
+	}
 	if m.AutoCreate {
 		return
 	}
-	for field, placeholders := range placeholderCCValues {
-		var val string
-		switch field {
-		case "NoPRUsCostCenterID":
-			val = m.NoPRUsCostCenterID
-		case "PRUsAllowedCostCenterID":
-			val = m.PRUsAllowedCostCenterID
-		}
-		for _, p := range placeholders {
-			if val == p {
-				m.log.Warn("Configuration appears to be a placeholder — update config/config.yaml with real cost center IDs before applying",
-					"field", field, "value", val)
-				break
-			}
-		}
-	}
-
 	if len(m.PRUsExceptionUsers) == 0 {
 		m.log.Info("No PRUs exception users configured — all users will be assigned to the default no_prus cost center")
 	}
@@ -356,31 +420,45 @@ func (m *Manager) LoadLastRunTimestamp() (*time.Time, error) {
 // Summary returns a human-readable map of current configuration for display.
 func (m *Manager) Summary() map[string]any {
 	s := map[string]any{
-		"enterprise":                  m.Enterprise,
-		"api_base_url":                m.APIBaseURL,
-		"cost_center_mode":            m.CostCenterMode,
-		"no_prus_cost_center_id":      m.NoPRUsCostCenterID,
-		"prus_allowed_cost_center_id": m.PRUsAllowedCostCenterID,
-		"prus_exception_users_count":  len(m.PRUsExceptionUsers),
-		"auto_create":                 m.AutoCreate,
-		"enable_incremental":          m.EnableIncremental,
-		"teams_enabled":               m.TeamsEnabled,
-		"teams_scope":                 m.TeamsScope,
-		"teams_mode":                  m.TeamsMode,
-		"budgets_enabled":             m.BudgetsEnabled,
-		"log_level":                   m.LogLevel,
-		"export_dir":                  m.ExportDir,
+		"enterprise":       m.Enterprise,
+		"api_base_url":     m.APIBaseURL,
+		"organizations":    m.Organizations,
+		"cost_center_mode": m.CostCenterMode,
+		"budgets_enabled":  m.BudgetsEnabled,
+		"log_level":        m.LogLevel,
+		"export_dir":       m.ExportDir,
 	}
 
-	if m.Enterprise != "" {
-		s["no_prus_cost_center_url"] = fmt.Sprintf(
-			"https://github.com/enterprises/%s/billing/cost_centers/%s",
-			m.Enterprise, m.NoPRUsCostCenterID,
-		)
-		s["prus_allowed_cost_center_url"] = fmt.Sprintf(
-			"https://github.com/enterprises/%s/billing/cost_centers/%s",
-			m.Enterprise, m.PRUsAllowedCostCenterID,
-		)
+	switch m.CostCenterMode {
+	case "users":
+		s["no_prus_cost_center_id"] = m.NoPRUsCostCenterID
+		s["prus_allowed_cost_center_id"] = m.PRUsAllowedCostCenterID
+		s["prus_exception_users_count"] = len(m.PRUsExceptionUsers)
+		s["auto_create"] = m.AutoCreate
+		s["enable_incremental"] = m.EnableIncremental
+		if m.Enterprise != "" {
+			s["no_prus_cost_center_url"] = fmt.Sprintf(
+				"https://github.com/enterprises/%s/billing/cost_centers/%s",
+				m.Enterprise, m.NoPRUsCostCenterID,
+			)
+			s["prus_allowed_cost_center_url"] = fmt.Sprintf(
+				"https://github.com/enterprises/%s/billing/cost_centers/%s",
+				m.Enterprise, m.PRUsAllowedCostCenterID,
+			)
+		}
+
+	case "teams":
+		s["teams_scope"] = m.TeamsScope
+		s["teams_strategy"] = m.TeamsStrategy
+		s["teams_auto_create"] = m.TeamsAutoCreate
+		s["teams_remove_unmatched_users"] = m.TeamsRemoveUnmatchedUsers
+		s["teams_mappings_count"] = len(m.TeamsMappings)
+
+	case "repos":
+		s["repos_mappings_count"] = len(m.ReposMappings)
+
+	case "custom-prop":
+		s["custom_prop_cost_centers_count"] = len(m.CustomPropCostCenters)
 	}
 
 	return s
@@ -434,46 +512,42 @@ func validateAPIURL(raw string, log *slog.Logger) (string, error) {
 	return raw, nil
 }
 
-// validateRepositoryConfig checks that each explicit mapping has the required fields.
-func validateRepositoryConfig(rc *RepositoryConfig) error {
-	for i, em := range rc.ExplicitMappings {
+// validateExplicitMappings checks that each explicit mapping has the required fields.
+func validateExplicitMappings(mappings []ExplicitMapping) error {
+	for i, em := range mappings {
 		if em.CostCenter == "" {
-			return fmt.Errorf("explicit_mapping[%d]: missing 'cost_center'", i)
+			return fmt.Errorf("repos.mappings[%d]: missing 'cost_center'", i)
 		}
 		if em.PropertyName == "" {
-			return fmt.Errorf("explicit_mapping[%d]: missing 'property_name'", i)
+			return fmt.Errorf("repos.mappings[%d]: missing 'property_name'", i)
 		}
 		if len(em.PropertyValues) == 0 {
-			return fmt.Errorf("explicit_mapping[%d]: missing 'property_values'", i)
+			return fmt.Errorf("repos.mappings[%d]: missing 'property_values'", i)
 		}
 	}
 	return nil
 }
 
-// validateCustomPropertyCostCenters validates each entry in the cost-centers list.
-func validateCustomPropertyCostCenters(entries []CustomPropertyCostCenter) error {
+// validateCustomPropCostCenters validates each entry in the custom-prop cost centers list.
+func validateCustomPropCostCenters(entries []CustomPropCostCenter) error {
 	seen := make(map[string]bool, len(entries))
 	for i, cc := range entries {
 		if cc.Name == "" {
-			return fmt.Errorf("cost-centers[%d]: missing 'name'", i)
-		}
-		if cc.Type != "custom-property" {
-			return fmt.Errorf("cost-centers[%d] (%q): unsupported type %q — only 'custom-property' is supported",
-				i, cc.Name, cc.Type)
+			return fmt.Errorf("custom_prop.cost_centers[%d]: missing 'name'", i)
 		}
 		if len(cc.Filters) == 0 {
-			return fmt.Errorf("cost-centers[%d] (%q): must have at least one filter", i, cc.Name)
+			return fmt.Errorf("custom_prop.cost_centers[%d] (%q): must have at least one filter", i, cc.Name)
 		}
 		for j, f := range cc.Filters {
 			if f.Property == "" {
-				return fmt.Errorf("cost-centers[%d] (%q) filter[%d]: missing 'property'", i, cc.Name, j)
+				return fmt.Errorf("custom_prop.cost_centers[%d] (%q) filter[%d]: missing 'property'", i, cc.Name, j)
 			}
 			if f.Value == "" {
-				return fmt.Errorf("cost-centers[%d] (%q) filter[%d]: missing 'value'", i, cc.Name, j)
+				return fmt.Errorf("custom_prop.cost_centers[%d] (%q) filter[%d]: missing 'value'", i, cc.Name, j)
 			}
 		}
 		if seen[cc.Name] {
-			return fmt.Errorf("cost-centers: duplicate name %q", cc.Name)
+			return fmt.Errorf("custom_prop.cost_centers: duplicate name %q", cc.Name)
 		}
 		seen[cc.Name] = true
 	}
@@ -488,28 +562,10 @@ func envOrFallback(envKey, yamlValue string) string {
 	return yamlValue
 }
 
-// firstNonEmpty returns the first non-empty string from the arguments.
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 // defaultString returns val if non-empty, otherwise def.
 func defaultString(val, def string) string {
 	if val != "" {
 		return val
-	}
-	return def
-}
-
-// boolPtrDefault dereferences a *bool, returning def if the pointer is nil.
-func boolPtrDefault(p *bool, def bool) bool {
-	if p != nil {
-		return *p
 	}
 	return def
 }

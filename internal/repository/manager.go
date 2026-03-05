@@ -66,17 +66,14 @@ type Manager struct {
 
 // NewManager creates a new repository manager from configuration.
 func NewManager(cfg *config.Manager, client *github.Client, logger *slog.Logger) (*Manager, error) {
-	if cfg.RepositoryConfig == nil {
-		return nil, fmt.Errorf("repository mode requires 'repository_config' in configuration")
-	}
-	if len(cfg.RepositoryConfig.ExplicitMappings) == 0 {
-		return nil, fmt.Errorf("repository mode requires at least one explicit mapping in repository_config")
+	if len(cfg.ReposMappings) == 0 {
+		return nil, fmt.Errorf("repos mode requires at least one mapping in cost_center.repos.mappings")
 	}
 	return &Manager{
 		cfg:      cfg,
 		client:   client,
 		log:      logger,
-		mappings: cfg.RepositoryConfig.ExplicitMappings,
+		mappings: cfg.ReposMappings,
 	}, nil
 }
 

@@ -12,21 +12,21 @@ All examples use `--mode plan` (dry-run). Replace with `--mode apply --yes` when
 
 ## Table of Contents
 
-- [1. PRU-Based (Default)](#1-pru-based-default)
-- [2. Teams-Based — Auto Mode](#2-teams-based--auto-mode)
-- [3. Teams-Based — Manual Mode](#3-teams-based--manual-mode)
-- [4. Repository-Based](#4-repository-based)
-- [5. Custom-Property Cost Centers](#5-custom-property-cost-centers)
+- [1. Users / PRU-Based (Default)](#1-users--pru-based-default)
+- [2. Teams — Auto Strategy](#2-teams--auto-strategy)
+- [3. Teams — Manual Strategy](#3-teams--manual-strategy)
+- [4. Repos (Explicit Mappings)](#4-repos-explicit-mappings)
+- [5. Custom-Prop (AND Filters)](#5-custom-prop-and-filters)
 - [6. Complex Scenarios](#6-complex-scenarios)
   - [6a. Teams + Budgets + Auto-Create](#6a-teams--budgets--auto-create)
   - [6b. Multi-Org Manual Teams Mapping](#6b-multi-org-manual-teams-mapping)
-  - [6c. Repository Mode with Multiple Properties](#6c-repository-mode-with-multiple-properties)
-  - [6d. Custom-Property with AND Filters + Budgets](#6d-custom-property-with-and-filters--budgets)
+  - [6c. Repos Mode with Multiple Properties](#6c-repos-mode-with-multiple-properties)
+  - [6d. Custom-Prop with AND Filters + Budgets](#6d-custom-prop-with-and-filters--budgets)
   - [6e. GHE Data Resident / GHES with Teams](#6e-ghe-data-resident--ghes-with-teams)
 
 ---
 
-## 1. PRU-Based (Default)
+## 1. Users / PRU-Based (Default)
 
 The simplest mode. All Copilot users go to a "no PRU overages" cost center, except for a list of exception users who go to a "PRU overages allowed" cost center.
 
@@ -36,13 +36,15 @@ The simplest mode. All Copilot users go to a "no PRU overages" cost center, exce
 github:
   enterprise: "my-enterprise"
 
-cost_centers:
-  auto_create: true
-  no_prus_cost_center_name: "00 - No PRU overages"
-  prus_allowed_cost_center_name: "01 - PRU overages allowed"
-  prus_exception_users:
-    - "alice"
-    - "bob"
+cost_center:
+  mode: "users"
+  users:
+    auto_create: true
+    no_prus_cost_center_name: "00 - No PRU overages"
+    prus_allowed_cost_center_name: "01 - PRU overages allowed"
+    exception_users:
+      - "alice"
+      - "bob"
 ```
 
 ### Run
@@ -62,7 +64,7 @@ gh cost-center assign --mode apply --yes
 
 ---
 
-## 2. Teams-Based — Auto Mode
+## 2. Teams — Auto Strategy
 
 One cost center is created automatically for each GitHub team. Users are assigned to the cost center that matches their team membership.
 
@@ -71,21 +73,22 @@ One cost center is created automatically for each GitHub team. Users are assigne
 ```yaml
 github:
   enterprise: "my-enterprise"
-
-teams:
-  enabled: true
-  scope: "organization"        # query teams from organizations
-  mode: "auto"                 # one cost center per team (auto-named)
   organizations:
     - "my-org"
-  auto_create_cost_centers: true
-  remove_users_no_longer_in_teams: true
+
+cost_center:
+  mode: "teams"
+  teams:
+    scope: "organization"      # query teams from organizations
+    strategy: "auto"           # one cost center per team (auto-named)
+    auto_create: true
+    remove_unmatched_users: true
 ```
 
 ### Run
 
 ```bash
-gh cost-center assign --teams --mode plan
+gh cost-center assign --mode plan
 ```
 
 ### Cost center naming
@@ -97,7 +100,7 @@ gh cost-center assign --teams --mode plan
 
 ---
 
-## 3. Teams-Based — Manual Mode
+## 3. Teams — Manual Strategy
 
 You control exactly which team maps to which cost center name.
 
@@ -106,25 +109,26 @@ You control exactly which team maps to which cost center name.
 ```yaml
 github:
   enterprise: "my-enterprise"
-
-teams:
-  enabled: true
-  scope: "organization"
-  mode: "manual"
   organizations:
     - "my-org"
-  auto_create_cost_centers: true
-  remove_users_no_longer_in_teams: true
-  team_mappings:
-    "my-org/frontend": "CC-Frontend"
-    "my-org/backend": "CC-Backend"
-    "my-org/infra": "CC-Platform"
+
+cost_center:
+  mode: "teams"
+  teams:
+    scope: "organization"
+    strategy: "manual"
+    auto_create: true
+    remove_unmatched_users: true
+    mappings:
+      "my-org/frontend": "CC-Frontend"
+      "my-org/backend": "CC-Backend"
+      "my-org/infra": "CC-Platform"
 ```
 
 ### Run
 
 ```bash
-gh cost-center assign --teams --mode plan
+gh cost-center assign --mode plan
 ```
 
 ### What happens
@@ -138,9 +142,9 @@ gh cost-center assign --teams --mode plan
 
 ---
 
-## 4. Repository-Based
+## 4. Repos (Explicit Mappings)
 
-Assign **repositories** (not users) to cost centers based on organization custom property values.
+Assign **repositories** (not users) to cost centers based on organization custom property values. Each mapping uses **OR logic** — a repository matches if its property value is any of the listed values.
 
 > **Prerequisite:** Configure [custom properties](https://docs.github.com/en/organizations/managing-organization-settings/managing-custom-properties-for-repositories-in-your-organization) on your GitHub organization repositories first.
 
@@ -149,30 +153,29 @@ Assign **repositories** (not users) to cost centers based on organization custom
 ```yaml
 github:
   enterprise: "my-enterprise"
-  cost_centers:
-    mode: "repository"
-    repository_config:
-      explicit_mappings:
-        - cost_center: "Platform Engineering"
-          property_name: "team"
-          property_values:
-            - "platform"
-            - "infrastructure"
-
-        - cost_center: "Product"
-          property_name: "team"
-          property_values:
-            - "product"
-
-teams:
   organizations:
-    - "my-org"          # required — tells the CLI which orgs to scan
+    - "my-org"
+
+cost_center:
+  mode: "repos"
+  repos:
+    mappings:
+      - cost_center: "Platform Engineering"
+        property_name: "team"
+        property_values:
+          - "platform"
+          - "infrastructure"
+
+      - cost_center: "Product"
+        property_name: "team"
+        property_values:
+          - "product"
 ```
 
 ### Run
 
 ```bash
-gh cost-center assign --repo --mode plan
+gh cost-center assign --mode plan
 ```
 
 ### Notes
@@ -183,9 +186,9 @@ gh cost-center assign --repo --mode plan
 
 ---
 
-## 5. Custom-Property Cost Centers
+## 5. Custom-Prop (AND Filters)
 
-Assign **repositories** to cost centers using fine-grained custom-property filters with **AND logic**. Unlike Repository Mode (section 4), which matches any value from a list (OR logic), custom-property cost centers require a repository to satisfy **every** filter simultaneously.
+Assign **repositories** to cost centers using fine-grained custom-property filters with **AND logic**. Unlike Repos mode (section 4), which matches any value from a list (OR logic), custom-prop cost centers require a repository to satisfy **every** filter simultaneously.
 
 > **Prerequisite:** Configure [custom properties](https://docs.github.com/en/organizations/managing-organization-settings/managing-custom-properties-for-repositories-in-your-organization) on your GitHub organization repositories first.
 
@@ -196,29 +199,27 @@ The simplest case: match repositories on a single custom property.
 ```yaml
 github:
   enterprise: "my-enterprise"
-
-teams:
   organizations:
     - "my-org"
 
-cost-centers:
-  - name: "Backend Engineering"
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "backend"
+cost_center:
+  mode: "custom-prop"
+  custom_prop:
+    cost_centers:
+      - name: "Backend Engineering"
+        filters:
+          - property: "team"
+            value: "backend"
 
-  - name: "Frontend Engineering"
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "frontend"
+      - name: "Frontend Engineering"
+        filters:
+          - property: "team"
+            value: "frontend"
 
-  - name: "Data & ML"
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "data"
+      - name: "Data & ML"
+        filters:
+          - property: "team"
+            value: "data"
 ```
 
 ### Config — Multiple Filters (AND Logic)
@@ -228,42 +229,40 @@ Combine multiple filters in a single cost center entry. A repository must match 
 ```yaml
 github:
   enterprise: "my-enterprise"
-
-teams:
   organizations:
     - "my-org"
 
-cost-centers:
-  - name: "Production Backend"
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "backend"
-      - property: "environment"
-        value: "production"
+cost_center:
+  mode: "custom-prop"
+  custom_prop:
+    cost_centers:
+      - name: "Production Backend"
+        filters:
+          - property: "team"
+            value: "backend"
+          - property: "environment"
+            value: "production"
 
-  - name: "Staging Backend"
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "backend"
-      - property: "environment"
-        value: "staging"
+      - name: "Staging Backend"
+        filters:
+          - property: "team"
+            value: "backend"
+          - property: "environment"
+            value: "staging"
 
-  - name: "Production Frontend"
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "frontend"
-      - property: "environment"
-        value: "production"
+      - name: "Production Frontend"
+        filters:
+          - property: "team"
+            value: "frontend"
+          - property: "environment"
+            value: "production"
 ```
 
 ### Run
 
 ```bash
-gh cost-center assign --repo --mode plan
-gh cost-center assign --repo --mode apply --yes
+gh cost-center assign --mode plan
+gh cost-center assign --mode apply --yes
 ```
 
 ### What happens
@@ -284,7 +283,6 @@ Given the multiple-filter config above:
 - For **OR** logic across different property combinations, add separate cost center entries.
 - Property names and values are **case-sensitive**.
 - Cost centers are auto-created if they don't exist.
-- This section uses the top-level `cost-centers` key, which can be used alongside or instead of `github.cost_centers.repository_config`.
 
 ---
 
@@ -297,15 +295,16 @@ Automatically create one cost center per team **and** provision Copilot and Acti
 ```yaml
 github:
   enterprise: "my-enterprise"
-
-teams:
-  enabled: true
-  scope: "organization"
-  mode: "auto"
   organizations:
     - "my-org"
-  auto_create_cost_centers: true
-  remove_users_no_longer_in_teams: true
+
+cost_center:
+  mode: "teams"
+  teams:
+    scope: "organization"
+    strategy: "auto"
+    auto_create: true
+    remove_unmatched_users: true
 
 budgets:
   enabled: true
@@ -319,7 +318,7 @@ budgets:
 ```
 
 ```bash
-gh cost-center assign --teams --mode plan --create-cost-centers --create-budgets
+gh cost-center assign --mode plan --create-cost-centers --create-budgets
 ```
 
 ---
@@ -331,112 +330,110 @@ Your enterprise has multiple organizations and you want to map teams from each o
 ```yaml
 github:
   enterprise: "my-enterprise"
-
-teams:
-  enabled: true
-  scope: "organization"
-  mode: "manual"
   organizations:
     - "org-alpha"
     - "org-beta"
-  auto_create_cost_centers: true
-  remove_users_no_longer_in_teams: true
-  team_mappings:
-    # Alpha org
-    "org-alpha/backend": "CC-Engineering"
-    "org-alpha/frontend": "CC-Engineering"
-    "org-alpha/data": "CC-Data"
-    # Beta org — maps into the same cost centers
-    "org-beta/api-team": "CC-Engineering"
-    "org-beta/analytics": "CC-Data"
+
+cost_center:
+  mode: "teams"
+  teams:
+    scope: "organization"
+    strategy: "manual"
+    auto_create: true
+    remove_unmatched_users: true
+    mappings:
+      # Alpha org
+      "org-alpha/backend": "CC-Engineering"
+      "org-alpha/frontend": "CC-Engineering"
+      "org-alpha/data": "CC-Data"
+      # Beta org — maps into the same cost centers
+      "org-beta/api-team": "CC-Engineering"
+      "org-beta/analytics": "CC-Data"
 ```
 
 ```bash
-gh cost-center assign --teams --mode plan --create-cost-centers
+gh cost-center assign --mode plan --create-cost-centers
 ```
 
 Users from both organizations are consolidated into shared cost centers (`CC-Engineering`, `CC-Data`).
 
 ---
 
-### 6c. Repository Mode with Multiple Properties
+### 6c. Repos Mode with Multiple Properties
 
 Map repositories using different custom properties to different cost centers. For example, separate by both `team` and `environment`.
 
 ```yaml
 github:
   enterprise: "my-enterprise"
-  cost_centers:
-    mode: "repository"
-    repository_config:
-      explicit_mappings:
-        # By team
-        - cost_center: "Platform Engineering"
-          property_name: "team"
-          property_values: ["platform", "infrastructure", "devops"]
-
-        - cost_center: "Frontend Applications"
-          property_name: "team"
-          property_values: ["web", "mobile", "ui"]
-
-        # By environment
-        - cost_center: "Production Services"
-          property_name: "environment"
-          property_values: ["production"]
-
-        - cost_center: "Staging"
-          property_name: "environment"
-          property_values: ["staging", "qa"]
-
-teams:
   organizations:
     - "my-org"
+
+cost_center:
+  mode: "repos"
+  repos:
+    mappings:
+      # By team
+      - cost_center: "Platform Engineering"
+        property_name: "team"
+        property_values: ["platform", "infrastructure", "devops"]
+
+      - cost_center: "Frontend Applications"
+        property_name: "team"
+        property_values: ["web", "mobile", "ui"]
+
+      # By environment
+      - cost_center: "Production Services"
+        property_name: "environment"
+        property_values: ["production"]
+
+      - cost_center: "Staging"
+        property_name: "environment"
+        property_values: ["staging", "qa"]
 ```
 
 ```bash
-gh cost-center assign --repo --mode plan --create-cost-centers
+gh cost-center assign --mode plan --create-cost-centers
 ```
 
 > A repository with `team=platform` **and** `environment=production` will match **both** "Platform Engineering" and "Production Services".
 
 ---
 
-### 6d. Custom-Property with AND Filters + Budgets
+### 6d. Custom-Prop with AND Filters + Budgets
 
-Use custom-property cost centers with AND filters and automatic budget creation. Ideal for enterprises that track both team ownership and a billing code on each repository.
+Use custom-prop cost centers with AND filters and automatic budget creation. Ideal for enterprises that track both team ownership and a billing code on each repository.
 
 ```yaml
 github:
   enterprise: "my-enterprise"
-
-teams:
   organizations:
     - "my-org"
 
-cost-centers:
-  - name: "CC-1234 — Backend"
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "backend"
-      - property: "cost-center-id"
-        value: "CC-1234"
+cost_center:
+  mode: "custom-prop"
+  custom_prop:
+    cost_centers:
+      - name: "CC-1234 — Backend"
+        filters:
+          - property: "team"
+            value: "backend"
+          - property: "cost-center-id"
+            value: "CC-1234"
 
-  - name: "CC-5678 — Frontend"
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "frontend"
-      - property: "cost-center-id"
-        value: "CC-5678"
+      - name: "CC-5678 — Frontend"
+        filters:
+          - property: "team"
+            value: "frontend"
+          - property: "cost-center-id"
+            value: "CC-5678"
 
-  - name: "CC-9999 — Data Platform"
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "data"
-      - property: "cost-center-id"
-        value: "CC-9999"
+      - name: "CC-9999 — Data Platform"
+        filters:
+          - property: "team"
+            value: "data"
+          - property: "cost-center-id"
+            value: "CC-9999"
 
 budgets:
   enabled: true
@@ -450,7 +447,7 @@ budgets:
 ```
 
 ```bash
-gh cost-center assign --repo --mode plan --create-cost-centers --create-budgets
+gh cost-center assign --mode plan --create-cost-centers --create-budgets
 ```
 
 Each cost center only includes repositories where **both** the `team` and `cost-center-id` properties match. Budgets are created for each new cost center.
@@ -464,6 +461,8 @@ If your enterprise runs on GitHub Enterprise Data Resident or a self-hosted GitH
 ```yaml
 github:
   enterprise: "my-enterprise"
+  organizations:
+    - "my-org"
 
   # GHE Data Resident
   api_base_url: "https://api.octocorp.ghe.com"
@@ -471,17 +470,16 @@ github:
   # — or GHES (self-hosted) —
   # api_base_url: "https://github.company.com/api/v3"
 
-teams:
-  enabled: true
-  scope: "organization"
-  mode: "auto"
-  organizations:
-    - "my-org"
-  auto_create_cost_centers: true
+cost_center:
+  mode: "teams"
+  teams:
+    scope: "organization"
+    strategy: "auto"
+    auto_create: true
 ```
 
 ```bash
-gh cost-center assign --teams --mode plan
+gh cost-center assign --mode plan
 ```
 
 ---
@@ -493,15 +491,15 @@ gh cost-center assign --teams --mode plan
 | `--mode plan` | Dry-run — preview changes without applying |
 | `--mode apply` | Push changes to GitHub |
 | `--yes` / `-y` | Skip confirmation prompt in apply mode |
-| `--teams` | Use teams-based assignment |
-| `--repo` | Use repository-based assignment |
 | `--create-cost-centers` | Create cost centers that don't exist yet |
 | `--create-budgets` | Create budgets for new cost centers |
-| `--incremental` | Only process users added since last run (PRU mode) |
+| `--incremental` | Only process users added since last run (users mode) |
 | `--check-current` | Check current cost center membership before assigning |
 | `--token <PAT>` | Pass a GitHub token directly |
 | `--config <path>` | Use a custom config file path |
 | `--verbose` / `-v` | Enable debug logging |
+
+> **Note:** The active mode (users, teams, repos, custom-prop) is determined by `cost_center.mode` in your config file, not by CLI flags.
 
 ---
 

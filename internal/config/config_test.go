@@ -27,10 +27,7 @@ func logger() *slog.Logger {
 // ---------- Loading the example config ----------
 
 func TestLoad_ExampleConfig(t *testing.T) {
-	// Use the repo's config.example.yaml — it must parse without error
-	// when the enterprise env var is provided.
 	t.Setenv("GITHUB_ENTERPRISE", "test-enterprise")
-	// Locate config.example.yaml relative to this test file (internal/config/ → ../../config/).
 	examplePath := filepath.Join("..", "..", "config", "config.example.yaml")
 	m, err := Load(examplePath, logger())
 	if err != nil {
@@ -183,92 +180,375 @@ github:
 	}
 }
 
-// ---------- Backward-compatible fallback chains ----------
+// ---------- Users (PRU) mode ----------
 
-func TestLoad_FallbackChains(t *testing.T) {
+func TestLoad_UsersMode(t *testing.T) {
 	yaml := `
 github:
   enterprise: "ent"
-cost_centers:
-  no_prus_cost_center: "OLD-CC-001"
-  prus_allowed_cost_center: "OLD-CC-002"
-  no_pru_name: "Old No PRU"
-  pru_allowed_name: "Old PRU Allowed"
+cost_center:
+  mode: "users"
+  users:
+    no_prus_cost_center_id: "CC-001"
+    prus_allowed_cost_center_id: "CC-002"
+    no_prus_cost_center_name: "No PRU"
+    prus_allowed_cost_center_name: "PRU Allowed"
+    exception_users:
+      - "alice"
+    auto_create: true
+    enable_incremental: true
 `
 	m, err := Load(writeConfig(t, yaml), logger())
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if m.NoPRUsCostCenterID != "OLD-CC-001" {
-		t.Errorf("NoPRUsCostCenterID = %q, want OLD-CC-001", m.NoPRUsCostCenterID)
+	if m.CostCenterMode != "users" {
+		t.Errorf("mode = %q", m.CostCenterMode)
 	}
-	if m.PRUsAllowedCostCenterID != "OLD-CC-002" {
-		t.Errorf("PRUsAllowedCostCenterID = %q, want OLD-CC-002", m.PRUsAllowedCostCenterID)
+	if m.NoPRUsCostCenterID != "CC-001" {
+		t.Errorf("NoPRUsCostCenterID = %q", m.NoPRUsCostCenterID)
 	}
-	if m.NoPRUsCostCenterName != "Old No PRU" {
+	if m.PRUsAllowedCostCenterID != "CC-002" {
+		t.Errorf("PRUsAllowedCostCenterID = %q", m.PRUsAllowedCostCenterID)
+	}
+	if m.NoPRUsCostCenterName != "No PRU" {
 		t.Errorf("NoPRUsCostCenterName = %q", m.NoPRUsCostCenterName)
 	}
-	if m.PRUsAllowedCostCenterName != "Old PRU Allowed" {
+	if m.PRUsAllowedCostCenterName != "PRU Allowed" {
 		t.Errorf("PRUsAllowedCostCenterName = %q", m.PRUsAllowedCostCenterName)
 	}
+	if len(m.PRUsExceptionUsers) != 1 || m.PRUsExceptionUsers[0] != "alice" {
+		t.Errorf("PRUsExceptionUsers = %v", m.PRUsExceptionUsers)
+	}
+	if !m.AutoCreate {
+		t.Error("expected AutoCreate = true")
+	}
+	if !m.EnableIncremental {
+		t.Error("expected EnableIncremental = true")
+	}
 }
 
-func TestLoad_NewKeysOverrideOldKeys(t *testing.T) {
+func TestLoad_UsersModeDefaults(t *testing.T) {
 	yaml := `
 github:
   enterprise: "ent"
-cost_centers:
-  no_prus_cost_center_id: "NEW-CC-001"
-  no_prus_cost_center: "OLD-CC-001"
-  prus_allowed_cost_center_id: "NEW-CC-002"
-  prus_allowed_cost_center: "OLD-CC-002"
 `
 	m, err := Load(writeConfig(t, yaml), logger())
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if m.NoPRUsCostCenterID != "NEW-CC-001" {
-		t.Errorf("NoPRUsCostCenterID = %q, want NEW-CC-001", m.NoPRUsCostCenterID)
+	if m.CostCenterMode != "users" {
+		t.Errorf("mode = %q, want 'users'", m.CostCenterMode)
 	}
-	if m.PRUsAllowedCostCenterID != "NEW-CC-002" {
-		t.Errorf("PRUsAllowedCostCenterID = %q, want NEW-CC-002", m.PRUsAllowedCostCenterID)
+	if m.NoPRUsCostCenterID != DefaultNoPRUsCCID {
+		t.Errorf("NoPRUsCostCenterID = %q, want default", m.NoPRUsCostCenterID)
+	}
+	if m.PRUsAllowedCostCenterID != DefaultPRUsAllowedCCID {
+		t.Errorf("PRUsAllowedCostCenterID = %q, want default", m.PRUsAllowedCostCenterID)
 	}
 }
 
-// ---------- Teams backward-compatible key ----------
+// ---------- Teams mode ----------
 
-func TestLoad_TeamsRemoveOrphanedFallback(t *testing.T) {
+func TestLoad_TeamsMode(t *testing.T) {
 	yaml := `
 github:
   enterprise: "ent"
-teams:
-  enabled: true
-  remove_orphaned_users: false
+  organizations:
+    - "my-org"
+cost_center:
+  mode: "teams"
+  teams:
+    scope: "organization"
+    strategy: "manual"
+    auto_create: true
+    remove_unmatched_users: true
+    mappings:
+      "my-org/frontend": "CC-FRONTEND"
 `
 	m, err := Load(writeConfig(t, yaml), logger())
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if m.TeamsRemoveUsersNoLongerInTeams != false {
-		t.Error("expected TeamsRemoveUsersNoLongerInTeams = false (via old key)")
+	if m.CostCenterMode != "teams" {
+		t.Errorf("mode = %q", m.CostCenterMode)
+	}
+	if m.TeamsScope != "organization" {
+		t.Errorf("TeamsScope = %q", m.TeamsScope)
+	}
+	if m.TeamsStrategy != "manual" {
+		t.Errorf("TeamsStrategy = %q", m.TeamsStrategy)
+	}
+	if !m.TeamsAutoCreate {
+		t.Error("expected TeamsAutoCreate = true")
+	}
+	if !m.TeamsRemoveUnmatchedUsers {
+		t.Error("expected TeamsRemoveUnmatchedUsers = true")
+	}
+	if m.TeamsMappings["my-org/frontend"] != "CC-FRONTEND" {
+		t.Errorf("TeamsMappings = %v", m.TeamsMappings)
 	}
 }
 
-func TestLoad_TeamsNewKeyOverridesOld(t *testing.T) {
+func TestLoad_TeamsModeDefaults(t *testing.T) {
 	yaml := `
 github:
   enterprise: "ent"
-teams:
-  enabled: true
-  remove_users_no_longer_in_teams: true
-  remove_orphaned_users: false
+cost_center:
+  mode: "teams"
 `
 	m, err := Load(writeConfig(t, yaml), logger())
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if m.TeamsRemoveUsersNoLongerInTeams != true {
-		t.Error("expected new key to take precedence")
+	if m.TeamsScope != DefaultTeamsScope {
+		t.Errorf("TeamsScope = %q, want default %q", m.TeamsScope, DefaultTeamsScope)
+	}
+	if m.TeamsStrategy != DefaultTeamsStrategy {
+		t.Errorf("TeamsStrategy = %q, want default %q", m.TeamsStrategy, DefaultTeamsStrategy)
+	}
+}
+
+func TestLoad_TeamsModeOrgScopeRequiresOrgs(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+cost_center:
+  mode: "teams"
+  teams:
+    scope: "organization"
+`
+	_, err := Load(writeConfig(t, yaml), logger())
+	if err == nil {
+		t.Fatal("expected error for organization scope without organizations")
+	}
+}
+
+func TestLoad_TeamsModeInvalidStrategy(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+cost_center:
+  mode: "teams"
+  teams:
+    strategy: "badvalue"
+`
+	_, err := Load(writeConfig(t, yaml), logger())
+	if err == nil {
+		t.Fatal("expected error for invalid strategy")
+	}
+}
+
+// ---------- Repos mode ----------
+
+func TestLoad_ReposMode(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+  organizations:
+    - "my-org"
+cost_center:
+  mode: "repos"
+  repos:
+    mappings:
+      - cost_center: "Platform"
+        property_name: "team"
+        property_values:
+          - "platform"
+          - "infra"
+`
+	m, err := Load(writeConfig(t, yaml), logger())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if m.CostCenterMode != "repos" {
+		t.Errorf("mode = %q", m.CostCenterMode)
+	}
+	if len(m.ReposMappings) != 1 {
+		t.Fatalf("expected 1 mapping, got %d", len(m.ReposMappings))
+	}
+	if m.ReposMappings[0].CostCenter != "Platform" {
+		t.Error("wrong cost center")
+	}
+	if len(m.ReposMappings[0].PropertyValues) != 2 {
+		t.Errorf("expected 2 property values, got %d", len(m.ReposMappings[0].PropertyValues))
+	}
+}
+
+func TestLoad_ReposModeRequiresOrgs(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+cost_center:
+  mode: "repos"
+  repos:
+    mappings:
+      - cost_center: "CC"
+        property_name: "team"
+        property_values: ["x"]
+`
+	_, err := Load(writeConfig(t, yaml), logger())
+	if err == nil {
+		t.Fatal("expected error for repos mode without organizations")
+	}
+}
+
+func TestLoad_ReposModeRequiresMappings(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+  organizations: ["org"]
+cost_center:
+  mode: "repos"
+`
+	_, err := Load(writeConfig(t, yaml), logger())
+	if err == nil {
+		t.Fatal("expected error for repos mode without mappings")
+	}
+}
+
+// ---------- Custom-prop mode ----------
+
+func TestLoad_CustomPropMode(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+  organizations:
+    - "my-org"
+cost_center:
+  mode: "custom-prop"
+  custom_prop:
+    cost_centers:
+      - name: "Backend Engineering"
+        filters:
+          - property: "team"
+            value: "backend"
+          - property: "cost-center-id"
+            value: "CC-1234"
+      - name: "Frontend Engineering"
+        filters:
+          - property: "team"
+            value: "frontend"
+`
+	m, err := Load(writeConfig(t, yaml), logger())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if m.CostCenterMode != "custom-prop" {
+		t.Errorf("mode = %q", m.CostCenterMode)
+	}
+	if len(m.CustomPropCostCenters) != 2 {
+		t.Fatalf("expected 2 custom-prop cost centers, got %d", len(m.CustomPropCostCenters))
+	}
+
+	backend := m.CustomPropCostCenters[0]
+	if backend.Name != "Backend Engineering" {
+		t.Errorf("name = %q", backend.Name)
+	}
+	if len(backend.Filters) != 2 {
+		t.Fatalf("expected 2 filters, got %d", len(backend.Filters))
+	}
+	if backend.Filters[0].Property != "team" || backend.Filters[0].Value != "backend" {
+		t.Errorf("filter[0] = {%q, %q}", backend.Filters[0].Property, backend.Filters[0].Value)
+	}
+	if backend.Filters[1].Property != "cost-center-id" || backend.Filters[1].Value != "CC-1234" {
+		t.Errorf("filter[1] = {%q, %q}", backend.Filters[1].Property, backend.Filters[1].Value)
+	}
+}
+
+func TestLoad_CustomPropModeRequiresOrgs(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+cost_center:
+  mode: "custom-prop"
+  custom_prop:
+    cost_centers:
+      - name: "Backend"
+        filters:
+          - property: "team"
+            value: "backend"
+`
+	_, err := Load(writeConfig(t, yaml), logger())
+	if err == nil {
+		t.Fatal("expected error for custom-prop mode without organizations")
+	}
+}
+
+func TestLoad_CustomPropModeMissingName(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+  organizations: ["org"]
+cost_center:
+  mode: "custom-prop"
+  custom_prop:
+    cost_centers:
+      - name: ""
+        filters:
+          - property: "team"
+            value: "backend"
+`
+	_, err := Load(writeConfig(t, yaml), logger())
+	if err == nil {
+		t.Fatal("expected error for missing name")
+	}
+}
+
+func TestLoad_CustomPropModeNoFilters(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+  organizations: ["org"]
+cost_center:
+  mode: "custom-prop"
+  custom_prop:
+    cost_centers:
+      - name: "Backend"
+        filters: []
+`
+	_, err := Load(writeConfig(t, yaml), logger())
+	if err == nil {
+		t.Fatal("expected error for empty filters")
+	}
+}
+
+func TestLoad_CustomPropModeDuplicateName(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+  organizations: ["org"]
+cost_center:
+  mode: "custom-prop"
+  custom_prop:
+    cost_centers:
+      - name: "Backend"
+        filters:
+          - property: "team"
+            value: "backend"
+      - name: "Backend"
+        filters:
+          - property: "env"
+            value: "prod"
+`
+	_, err := Load(writeConfig(t, yaml), logger())
+	if err == nil {
+		t.Fatal("expected error for duplicate name")
+	}
+}
+
+// ---------- Invalid mode ----------
+
+func TestLoad_InvalidMode(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+cost_center:
+  mode: "invalid"
+`
+	_, err := Load(writeConfig(t, yaml), logger())
+	if err == nil {
+		t.Fatal("expected error for invalid mode")
 	}
 }
 
@@ -306,262 +586,80 @@ func TestValidateAPIURL(t *testing.T) {
 	}
 }
 
-// ---------- Repository config validation ----------
+// ---------- Explicit mapping validation ----------
 
-func TestValidateRepositoryConfig(t *testing.T) {
-	valid := &RepositoryConfig{
-		ExplicitMappings: []ExplicitMapping{
-			{CostCenter: "CC1", PropertyName: "team", PropertyValues: []string{"a"}},
-		},
+func TestValidateExplicitMappings(t *testing.T) {
+	valid := []ExplicitMapping{
+		{CostCenter: "CC1", PropertyName: "team", PropertyValues: []string{"a"}},
 	}
-	if err := validateRepositoryConfig(valid); err != nil {
+	if err := validateExplicitMappings(valid); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	missing := &RepositoryConfig{
-		ExplicitMappings: []ExplicitMapping{
-			{CostCenter: "", PropertyName: "team", PropertyValues: []string{"a"}},
-		},
+	missing := []ExplicitMapping{
+		{CostCenter: "", PropertyName: "team", PropertyValues: []string{"a"}},
 	}
-	if err := validateRepositoryConfig(missing); err == nil {
+	if err := validateExplicitMappings(missing); err == nil {
 		t.Fatal("expected error for missing cost_center")
 	}
 
-	noValues := &RepositoryConfig{
-		ExplicitMappings: []ExplicitMapping{
-			{CostCenter: "CC1", PropertyName: "team", PropertyValues: []string{}},
-		},
+	noValues := []ExplicitMapping{
+		{CostCenter: "CC1", PropertyName: "team", PropertyValues: []string{}},
 	}
-	if err := validateRepositoryConfig(noValues); err == nil {
+	if err := validateExplicitMappings(noValues); err == nil {
 		t.Fatal("expected error for empty property_values")
 	}
-}
 
-// ---------- Custom-property cost centers ----------
-
-func TestLoad_CustomPropertyCostCenters(t *testing.T) {
-	yaml := `
-github:
-  enterprise: "ent"
-cost-centers:
-  - name: "Backend Engineering"
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "backend"
-      - property: "cost-center-id"
-        value: "CC-1234"
-  - name: "Frontend Engineering"
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "frontend"
-`
-	m, err := Load(writeConfig(t, yaml), logger())
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	noProp := []ExplicitMapping{
+		{CostCenter: "CC1", PropertyName: "", PropertyValues: []string{"a"}},
 	}
-	if len(m.CustomPropertyCostCenters) != 2 {
-		t.Fatalf("expected 2 custom-property cost centers, got %d", len(m.CustomPropertyCostCenters))
-	}
-
-	backend := m.CustomPropertyCostCenters[0]
-	if backend.Name != "Backend Engineering" {
-		t.Errorf("name = %q", backend.Name)
-	}
-	if backend.Type != "custom-property" {
-		t.Errorf("type = %q", backend.Type)
-	}
-	if len(backend.Filters) != 2 {
-		t.Fatalf("expected 2 filters, got %d", len(backend.Filters))
-	}
-	if backend.Filters[0].Property != "team" || backend.Filters[0].Value != "backend" {
-		t.Errorf("filter[0] = {%q, %q}", backend.Filters[0].Property, backend.Filters[0].Value)
-	}
-	if backend.Filters[1].Property != "cost-center-id" || backend.Filters[1].Value != "CC-1234" {
-		t.Errorf("filter[1] = {%q, %q}", backend.Filters[1].Property, backend.Filters[1].Value)
+	if err := validateExplicitMappings(noProp); err == nil {
+		t.Fatal("expected error for empty property_name")
 	}
 }
 
-func TestLoad_CustomPropertyCostCenters_InvalidType(t *testing.T) {
-	yaml := `
-github:
-  enterprise: "ent"
-cost-centers:
-  - name: "Backend"
-    type: "teams"
-    filters:
-      - property: "team"
-        value: "backend"
-`
-	_, err := Load(writeConfig(t, yaml), logger())
-	if err == nil {
-		t.Fatal("expected error for unsupported type")
-	}
-}
+// ---------- Custom-prop cost center validation ----------
 
-func TestLoad_CustomPropertyCostCenters_MissingName(t *testing.T) {
-	yaml := `
-github:
-  enterprise: "ent"
-cost-centers:
-  - name: ""
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "backend"
-`
-	_, err := Load(writeConfig(t, yaml), logger())
-	if err == nil {
-		t.Fatal("expected error for missing name")
-	}
-}
-
-func TestLoad_CustomPropertyCostCenters_NoFilters(t *testing.T) {
-	yaml := `
-github:
-  enterprise: "ent"
-cost-centers:
-  - name: "Backend"
-    type: "custom-property"
-    filters: []
-`
-	_, err := Load(writeConfig(t, yaml), logger())
-	if err == nil {
-		t.Fatal("expected error for empty filters")
-	}
-}
-
-func TestLoad_CustomPropertyCostCenters_DuplicateName(t *testing.T) {
-	yaml := `
-github:
-  enterprise: "ent"
-cost-centers:
-  - name: "Backend"
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "backend"
-  - name: "Backend"
-    type: "custom-property"
-    filters:
-      - property: "env"
-        value: "prod"
-`
-	_, err := Load(writeConfig(t, yaml), logger())
-	if err == nil {
-		t.Fatal("expected error for duplicate name")
-	}
-}
-
-func TestLoad_CustomPropertyAndRepositoryModeCoexist(t *testing.T) {
-	yaml := `
-github:
-  enterprise: "ent"
-  cost_centers:
-    mode: "repository"
-    repository_config:
-      explicit_mappings:
-        - cost_center: "Platform"
-          property_name: "team"
-          property_values:
-            - "platform"
-cost-centers:
-  - name: "Backend"
-    type: "custom-property"
-    filters:
-      - property: "team"
-        value: "backend"
-`
-	m, err := Load(writeConfig(t, yaml), logger())
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if m.RepositoryConfig == nil {
-		t.Error("expected RepositoryConfig to be set")
-	}
-	if len(m.CustomPropertyCostCenters) != 1 {
-		t.Errorf("expected 1 custom-property cost center, got %d", len(m.CustomPropertyCostCenters))
-	}
-}
-
-func TestValidateCustomPropertyCostCenters_Valid(t *testing.T) {
-	entries := []CustomPropertyCostCenter{
+func TestValidateCustomPropCostCenters_Valid(t *testing.T) {
+	entries := []CustomPropCostCenter{
 		{
 			Name: "Backend",
-			Type: "custom-property",
 			Filters: []CustomPropertyFilter{
 				{Property: "team", Value: "backend"},
 				{Property: "env", Value: "prod"},
 			},
 		},
 	}
-	if err := validateCustomPropertyCostCenters(entries); err != nil {
+	if err := validateCustomPropCostCenters(entries); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestValidateCustomPropertyCostCenters_MissingFilterProperty(t *testing.T) {
-	entries := []CustomPropertyCostCenter{
+func TestValidateCustomPropCostCenters_MissingFilterProperty(t *testing.T) {
+	entries := []CustomPropCostCenter{
 		{
 			Name: "Backend",
-			Type: "custom-property",
 			Filters: []CustomPropertyFilter{
 				{Property: "", Value: "backend"},
 			},
 		},
 	}
-	if err := validateCustomPropertyCostCenters(entries); err == nil {
+	if err := validateCustomPropCostCenters(entries); err == nil {
 		t.Fatal("expected error for missing filter property")
 	}
 }
 
-func TestValidateCustomPropertyCostCenters_MissingFilterValue(t *testing.T) {
-	entries := []CustomPropertyCostCenter{
+func TestValidateCustomPropCostCenters_MissingFilterValue(t *testing.T) {
+	entries := []CustomPropCostCenter{
 		{
 			Name: "Backend",
-			Type: "custom-property",
 			Filters: []CustomPropertyFilter{
 				{Property: "team", Value: ""},
 			},
 		},
 	}
-	if err := validateCustomPropertyCostCenters(entries); err == nil {
+	if err := validateCustomPropCostCenters(entries); err == nil {
 		t.Fatal("expected error for missing filter value")
-	}
-}
-
-// ---------- Repository mode ----------
-
-func TestLoad_RepositoryMode(t *testing.T) {
-	yaml := `
-github:
-  enterprise: "ent"
-  cost_centers:
-    mode: "repository"
-    repository_config:
-      explicit_mappings:
-        - cost_center: "Platform"
-          property_name: "team"
-          property_values:
-            - "platform"
-            - "infra"
-`
-	m, err := Load(writeConfig(t, yaml), logger())
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if m.CostCenterMode != "repository" {
-		t.Errorf("mode = %q", m.CostCenterMode)
-	}
-	if m.RepositoryConfig == nil {
-		t.Fatal("RepositoryConfig is nil")
-	}
-	if len(m.RepositoryConfig.ExplicitMappings) != 1 {
-		t.Fatalf("expected 1 mapping, got %d", len(m.RepositoryConfig.ExplicitMappings))
-	}
-	if m.RepositoryConfig.ExplicitMappings[0].CostCenter != "Platform" {
-		t.Error("wrong cost center")
 	}
 }
 
@@ -620,8 +718,10 @@ func TestCheckConfigWarnings_NoAutoCreate(t *testing.T) {
 	yaml := `
 github:
   enterprise: "ent"
-cost_centers:
-  no_prus_cost_center_id: "REPLACE_WITH_NO_PRUS_COST_CENTER_ID"
+cost_center:
+  mode: "users"
+  users:
+    no_prus_cost_center_id: "REPLACE_WITH_NO_PRUS_COST_CENTER_ID"
 `
 	m, err := Load(writeConfig(t, yaml), logger())
 	if err != nil {
@@ -635,15 +735,16 @@ func TestCheckConfigWarnings_AutoCreateSkips(t *testing.T) {
 	yaml := `
 github:
   enterprise: "ent"
-cost_centers:
-  auto_create: true
-  no_prus_cost_center_id: "REPLACE_WITH_NO_PRUS_COST_CENTER_ID"
+cost_center:
+  mode: "users"
+  users:
+    auto_create: true
+    no_prus_cost_center_id: "REPLACE_WITH_NO_PRUS_COST_CENTER_ID"
 `
 	m, err := Load(writeConfig(t, yaml), logger())
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	// With auto_create=true, placeholders should be silently accepted.
 	m.CheckConfigWarnings()
 }
 
@@ -659,22 +760,52 @@ github:
 		t.Fatalf("Load: %v", err)
 	}
 	s := m.Summary()
-	expectedKeys := []string{
+	// Mode-independent keys
+	for _, k := range []string{
 		"enterprise",
 		"api_base_url",
 		"cost_center_mode",
-		"no_prus_cost_center_id",
-		"prus_allowed_cost_center_id",
-		"auto_create",
-		"teams_enabled",
 		"budgets_enabled",
 		"log_level",
 		"export_dir",
-		"prus_exception_users_count",
-	}
-	for _, k := range expectedKeys {
+	} {
 		if _, ok := s[k]; !ok {
 			t.Errorf("Summary missing key %q", k)
+		}
+	}
+	// Users-mode-specific keys (default mode)
+	for _, k := range []string{
+		"no_prus_cost_center_id",
+		"prus_allowed_cost_center_id",
+		"prus_exception_users_count",
+		"auto_create",
+	} {
+		if _, ok := s[k]; !ok {
+			t.Errorf("Summary missing users-mode key %q", k)
+		}
+	}
+}
+
+func TestSummary_TeamsModeKeys(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+cost_center:
+  mode: "teams"
+`
+	m, err := Load(writeConfig(t, yaml), logger())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	s := m.Summary()
+	for _, k := range []string{
+		"teams_scope",
+		"teams_strategy",
+		"teams_auto_create",
+		"teams_remove_unmatched_users",
+	} {
+		if _, ok := s[k]; !ok {
+			t.Errorf("Summary missing teams-mode key %q", k)
 		}
 	}
 }
@@ -698,8 +829,6 @@ func TestEnableAutoCreation(t *testing.T) {
 	yaml := `
 github:
   enterprise: "ent"
-cost_centers:
-  auto_create: false
 `
 	m, err := Load(writeConfig(t, yaml), logger())
 	if err != nil {
@@ -768,28 +897,24 @@ export_dir: "` + dir + `"
 
 // ---------- Helper tests ----------
 
-func TestFirstNonEmpty(t *testing.T) {
-	if got := firstNonEmpty("", "", "c"); got != "c" {
-		t.Errorf("got %q", got)
+func TestDefaultString(t *testing.T) {
+	if got := defaultString("a", "b"); got != "a" {
+		t.Errorf("got %q, want %q", got, "a")
 	}
-	if got := firstNonEmpty("a", "b"); got != "a" {
-		t.Errorf("got %q", got)
+	if got := defaultString("", "b"); got != "b" {
+		t.Errorf("got %q, want %q", got, "b")
 	}
-	if got := firstNonEmpty(""); got != "" {
-		t.Errorf("got %q", got)
+	if got := defaultString("", ""); got != "" {
+		t.Errorf("got %q, want empty", got)
 	}
 }
 
-func TestBoolPtrDefault(t *testing.T) {
-	tr := true
-	fa := false
-	if got := boolPtrDefault(&tr, false); got != true {
-		t.Error("expected true")
+func TestEnvOrFallback(t *testing.T) {
+	t.Setenv("TEST_ENV_OR_FALLBACK_KEY", "env-val")
+	if got := envOrFallback("TEST_ENV_OR_FALLBACK_KEY", "yaml-val"); got != "env-val" {
+		t.Errorf("got %q, want env-val", got)
 	}
-	if got := boolPtrDefault(&fa, true); got != false {
-		t.Error("expected false")
-	}
-	if got := boolPtrDefault(nil, true); got != true {
-		t.Error("expected default true")
+	if got := envOrFallback("UNSET_KEY_12345", "yaml-val"); got != "yaml-val" {
+		t.Errorf("got %q, want yaml-val", got)
 	}
 }

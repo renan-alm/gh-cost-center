@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/renan-alm/gh-cost-center/internal/cache"
+	"github.com/renan-alm/gh-cost-center/internal/customprop"
 	"github.com/renan-alm/gh-cost-center/internal/github"
 	"github.com/renan-alm/gh-cost-center/internal/pru"
 	"github.com/renan-alm/gh-cost-center/internal/repository"
@@ -20,8 +21,6 @@ var (
 	// assign flags
 	assignMode           string
 	assignYes            bool
-	assignTeams          bool
-	assignRepo           bool
 	assignUsers          string
 	assignIncremental    bool
 	assignCreateCC       bool
@@ -32,49 +31,38 @@ var (
 var assignCmd = &cobra.Command{
 	Use:   "assign",
 	Short: "Assign users or repositories to cost centers",
-	Long: `Assign users or repositories to cost centers based on the selected mode.
+	Long: `Assign users or repositories to cost centers based on the configured mode.
 
-Modes:
-  PRU-based (default):   Assigns all Copilot users to cost centers based on
-                         PRU exception rules.
-  Teams-based (--teams): Assigns users based on GitHub team membership.
-  Repository (--repo):   Assigns repos based on custom property values.
+The mode is determined by cost_center.mode in config.yaml:
+  users (default): Assigns all Copilot users based on PRU exception rules.
+  teams:           Assigns users based on GitHub team membership.
+  repos:           Assigns repos based on custom property values (explicit mappings).
+  custom-prop:     Assigns repos using custom property filters (AND logic).
 
 The --mode flag controls execution:
   plan  - Preview changes without applying (default)
   apply - Push assignments to GitHub Enterprise
 
 Examples:
-  # Preview PRU-based assignments
+  # Preview assignments (mode from config)
   gh cost-center assign --mode plan
 
-  # Apply PRU-based assignments (skip confirmation)
+  # Apply assignments (skip confirmation)
   gh cost-center assign --mode apply --yes
-
-  # Preview teams-based assignments
-  gh cost-center assign --teams --mode plan
-
-  # Apply teams-based assignments
-  gh cost-center assign --teams --mode apply --yes
 
   # Apply with cost center auto-creation
   gh cost-center assign --mode apply --yes --create-cost-centers
 
-  # Process only new users since last run
-  gh cost-center assign --mode apply --yes --incremental
-
-  # Apply repository-based assignments
-  gh cost-center assign --repo --mode apply --yes`,
+  # Process only new users since last run (users mode)
+  gh cost-center assign --mode apply --yes --incremental`,
 	RunE: runAssign,
 }
 
 func init() {
 	assignCmd.Flags().StringVar(&assignMode, "mode", "plan", "execution mode: plan (preview) or apply (push changes)")
 	assignCmd.Flags().BoolVarP(&assignYes, "yes", "y", false, "skip confirmation prompt in apply mode")
-	assignCmd.Flags().BoolVar(&assignTeams, "teams", false, "enable teams-based assignment mode")
-	assignCmd.Flags().BoolVar(&assignRepo, "repo", false, "enable repository-based assignment mode")
 	assignCmd.Flags().StringVar(&assignUsers, "users", "", "comma-separated list of specific users to process")
-	assignCmd.Flags().BoolVar(&assignIncremental, "incremental", false, "only process users added since last run (PRU mode)")
+	assignCmd.Flags().BoolVar(&assignIncremental, "incremental", false, "only process users added since last run (users mode)")
 	assignCmd.Flags().BoolVar(&assignCreateCC, "create-cost-centers", false, "create cost centers if they don't exist")
 	assignCmd.Flags().BoolVar(&assignCreateBudgets, "create-budgets", false, "create budgets for new cost centers")
 	assignCmd.Flags().BoolVar(&assignCheckCurrentCC, "check-current", false, "check current cost center membership before assigning")
@@ -82,20 +70,23 @@ func init() {
 	rootCmd.AddCommand(assignCmd)
 }
 
-// runAssign dispatches to the appropriate assignment mode.
+// runAssign dispatches to the appropriate assignment mode based on config.
 func runAssign(cmd *cobra.Command, _ []string) error {
 	if assignMode != "plan" && assignMode != "apply" {
 		return fmt.Errorf("invalid --mode %q: must be 'plan' or 'apply'", assignMode)
 	}
 
-	if assignTeams {
+	switch cfgManager.CostCenterMode {
+	case "teams":
 		return runTeamsAssign(cmd)
-	}
-	if assignRepo {
+	case "repos":
 		return runRepoAssign(cmd)
+	case "custom-prop":
+		return runCustomPropAssign(cmd)
+	default:
+		// "users" (PRU) is the default
+		return runPRUAssign(cmd)
 	}
-
-	return runPRUAssign(cmd)
 }
 
 // attachCache creates a file-based cost center cache and attaches it to the
@@ -411,33 +402,36 @@ func runTeamsAssign(_ *cobra.Command) error {
 	return nil
 }
 
-// runRepoAssign implements the repository-based assignment flow.
-// It handles both explicit-mapping mode and custom-property discovery mode,
-// and can run both if both are configured.
+// runRepoAssign implements the repository explicit-mapping assignment flow.
 func runRepoAssign(_ *cobra.Command) error {
 	logger := slog.Default()
 
-	// Determine organization name from config.
-	if len(cfgManager.TeamsOrganizations) == 0 {
-		return fmt.Errorf("repository mode requires at least one organization in teams.organizations config")
+	if len(cfgManager.Organizations) == 0 {
+		return fmt.Errorf("repos mode requires at least one organization in github.organizations config")
 	}
-	org := cfgManager.TeamsOrganizations[0]
+	org := cfgManager.Organizations[0]
 
-	// Create GitHub API client.
 	client, err := github.NewClient(cfgManager, logger)
 	if err != nil {
 		return fmt.Errorf("creating GitHub client: %w", err)
 	}
 	attachCache(client, logger)
 
-	hasExplicitMappings := cfgManager.RepositoryConfig != nil && len(cfgManager.RepositoryConfig.ExplicitMappings) > 0
-	hasCustomProperties := len(cfgManager.CustomPropertyCostCenters) > 0
-
-	if !hasExplicitMappings && !hasCustomProperties {
-		return fmt.Errorf("repository mode requires either explicit_mappings (under github.cost_centers.repository_config) or custom-property cost centers (under cost-centers) in config")
+	mgr, err := repository.NewManager(cfgManager, client, logger)
+	if err != nil {
+		return fmt.Errorf("initializing repository manager: %w", err)
 	}
 
-	// Confirmation in apply mode (once, before any operations).
+	if issues := mgr.ValidateConfiguration(); len(issues) > 0 {
+		for _, issue := range issues {
+			logger.Error("Configuration issue", "detail", issue)
+		}
+		return fmt.Errorf("invalid repository configuration: %d issues found", len(issues))
+	}
+
+	mgr.PrintConfigSummary(org)
+
+	// Confirmation in apply mode.
 	if assignMode == "apply" && !assignYes {
 		fmt.Print("\nProceed with APPLY? Type 'apply' to continue: ")
 		scanner := bufio.NewScanner(os.Stdin)
@@ -449,59 +443,70 @@ func runRepoAssign(_ *cobra.Command) error {
 		}
 	}
 
-	// --- Explicit-mapping mode ---
-	if hasExplicitMappings {
-		mgr, err := repository.NewManager(cfgManager, client, logger)
-		if err != nil {
-			return fmt.Errorf("initializing repository manager: %w", err)
-		}
+	createBudgets := assignCreateBudgets && cfgManager.BudgetsEnabled
+	summary, err := mgr.Run(org, assignMode, createBudgets)
+	if err != nil {
+		return fmt.Errorf("repository assignment failed: %w", err)
+	}
+	if summary != nil {
+		summary.Print()
+	}
 
-		if issues := mgr.ValidateConfiguration(); len(issues) > 0 {
-			for _, issue := range issues {
-				logger.Error("Configuration issue", "detail", issue)
+	logger.Info("Repos assign command completed successfully")
+	return nil
+}
+
+// runCustomPropAssign implements the custom-property assignment flow.
+func runCustomPropAssign(_ *cobra.Command) error {
+	logger := slog.Default()
+
+	if len(cfgManager.Organizations) == 0 {
+		return fmt.Errorf("custom-prop mode requires at least one organization in github.organizations config")
+	}
+	org := cfgManager.Organizations[0]
+
+	client, err := github.NewClient(cfgManager, logger)
+	if err != nil {
+		return fmt.Errorf("creating GitHub client: %w", err)
+	}
+	attachCache(client, logger)
+
+	cpMgr, err := customprop.NewManager(cfgManager, client, logger)
+	if err != nil {
+		return fmt.Errorf("initializing custom-property manager: %w", err)
+	}
+
+	if issues := cpMgr.ValidateConfiguration(); len(issues) > 0 {
+		for _, issue := range issues {
+			logger.Error("Custom-property configuration issue", "detail", issue)
+		}
+		return fmt.Errorf("invalid custom-property configuration: %d issues found", len(issues))
+	}
+
+	cpMgr.PrintConfigSummary(org)
+
+	// Confirmation in apply mode.
+	if assignMode == "apply" && !assignYes {
+		fmt.Print("\nProceed with APPLY? Type 'apply' to continue: ")
+		scanner := bufio.NewScanner(os.Stdin)
+		if scanner.Scan() {
+			if strings.TrimSpace(strings.ToLower(scanner.Text())) != "apply" {
+				logger.Warn("Aborted by user")
+				return nil
 			}
-			return fmt.Errorf("invalid repository configuration: %d issues found", len(issues))
-		}
-
-		mgr.PrintConfigSummary(org)
-
-		createBudgets := assignCreateBudgets && cfgManager.BudgetsEnabled
-		summary, err := mgr.Run(org, assignMode, createBudgets)
-		if err != nil {
-			return fmt.Errorf("repository assignment (explicit mappings) failed: %w", err)
-		}
-		if summary != nil {
-			summary.Print()
 		}
 	}
 
-	// --- Custom-property mode ---
-	if hasCustomProperties {
-		cpMgr, err := repository.NewCustomPropertyManager(cfgManager, client, logger)
-		if err != nil {
-			return fmt.Errorf("initializing custom-property manager: %w", err)
-		}
-
-		if issues := cpMgr.ValidateConfiguration(); len(issues) > 0 {
-			for _, issue := range issues {
-				logger.Error("Custom-property configuration issue", "detail", issue)
-			}
-			return fmt.Errorf("invalid custom-property configuration: %d issues found", len(issues))
-		}
-
-		cpMgr.PrintConfigSummary(org)
-
-		createBudgets := assignCreateBudgets && cfgManager.BudgetsEnabled
-		cpSummary, err := cpMgr.Run(org, assignMode, createBudgets)
-		if err != nil {
-			return fmt.Errorf("custom-property assignment failed: %w", err)
-		}
-		if cpSummary != nil {
-			cpSummary.Print()
-		}
+	createBudgets := assignCreateBudgets && cfgManager.BudgetsEnabled
+	cpSummary, err := cpMgr.Run(org, assignMode, createBudgets)
+	if err != nil {
+		return fmt.Errorf("custom-property assignment failed: %w", err)
+	}
+	if cpSummary != nil {
+		cpSummary.Print()
 	}
 
-	logger.Info("Repository assign command completed successfully")
+	logger.Info("Custom-prop assign command completed successfully")
 	return nil
 }
 

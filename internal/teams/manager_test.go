@@ -13,13 +13,13 @@ import (
 func newTestManager(scope, mode string, orgs []string, mappings map[string]string, autoCreate, removeUsers bool) *Manager {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := &config.Manager{
-		TeamsScope:                      scope,
-		TeamsMode:                       mode,
-		TeamsOrganizations:              orgs,
-		TeamsAutoCreate:                 autoCreate,
-		TeamsMappings:                   mappings,
-		TeamsRemoveUsersNoLongerInTeams: removeUsers,
-		Enterprise:                      "test-enterprise",
+		TeamsScope:                scope,
+		TeamsStrategy:             mode,
+		Organizations:             orgs,
+		TeamsAutoCreate:           autoCreate,
+		TeamsMappings:             mappings,
+		TeamsRemoveUnmatchedUsers: removeUsers,
+		Enterprise:                "test-enterprise",
 	}
 	return &Manager{
 		cfg:          cfg,
@@ -220,13 +220,13 @@ func TestSummaryPrint(t *testing.T) {
 func TestNewManager(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	cfg := &config.Manager{
-		TeamsScope:                      "enterprise",
-		TeamsMode:                       "auto",
-		TeamsOrganizations:              []string{"org1"},
-		TeamsAutoCreate:                 true,
-		TeamsMappings:                   map[string]string{"a": "b"},
-		TeamsRemoveUsersNoLongerInTeams: true,
-		Enterprise:                      "ent",
+		TeamsScope:                "enterprise",
+		TeamsStrategy:             "auto",
+		Organizations:             []string{"org1"},
+		TeamsAutoCreate:           true,
+		TeamsMappings:             map[string]string{"a": "b"},
+		TeamsRemoveUnmatchedUsers: true,
+		Enterprise:                "ent",
 	}
 
 	mgr := NewManager(cfg, nil, logger)

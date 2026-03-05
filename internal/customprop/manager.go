@@ -1,4 +1,8 @@
-package repository
+// Package customprop implements custom-property-based cost center assignment
+// for GitHub Enterprise repositories.  Each cost center specifies a set of
+// filters that are combined with AND logic — a repository must satisfy every
+// filter to be included in that cost center.
+package customprop
 
 import (
 	"fmt"
@@ -9,8 +13,8 @@ import (
 	"github.com/renan-alm/gh-cost-center/internal/github"
 )
 
-// CustomPropertyResult records the outcome of processing a single custom-property cost center.
-type CustomPropertyResult struct {
+// Result records the outcome of processing a single custom-property cost center.
+type Result struct {
 	CostCenter    string
 	CostCenterID  string
 	Filters       []config.CustomPropertyFilter
@@ -20,16 +24,16 @@ type CustomPropertyResult struct {
 	Message       string
 }
 
-// CustomPropertySummary holds the overall result of a custom-property assignment run.
-type CustomPropertySummary struct {
-	TotalRepos    int
-	TotalCCs      int
-	AppliedCCs    int
-	Results       []CustomPropertyResult
+// Summary holds the overall result of a custom-property assignment run.
+type Summary struct {
+	TotalRepos int
+	TotalCCs   int
+	AppliedCCs int
+	Results    []Result
 }
 
 // Print displays the summary to stdout.
-func (s *CustomPropertySummary) Print() {
+func (s *Summary) Print() {
 	fmt.Println()
 	fmt.Println(strings.Repeat("=", 80))
 	fmt.Println("CUSTOM-PROPERTY ASSIGNMENT SUMMARY")
@@ -49,48 +53,43 @@ func (s *CustomPropertySummary) Print() {
 		if r.Success {
 			fmt.Println("  Status:    Success")
 		} else {
-			fmt.Printf("  Status:    Failed \u2014 %s\n", r.Message)
+			fmt.Printf("  Status:    Failed — %s\n", r.Message)
 		}
 	}
 	fmt.Println(strings.Repeat("=", 80))
 }
 
-// CustomPropertyManager discovers repositories using GitHub custom property
-// filters and assigns them to cost centers.  Each cost center entry in the
-// configuration specifies a set of filters that are combined with AND logic —
-// a repository must satisfy every filter to be included in that cost center.
-type CustomPropertyManager struct {
-	cfg        *config.Manager
-	client     *github.Client
-	log        *slog.Logger
-	costCenters []config.CustomPropertyCostCenter
+// Manager discovers repositories using GitHub custom property filters and
+// assigns them to cost centers.
+type Manager struct {
+	cfg         *config.Manager
+	client      *github.Client
+	log         *slog.Logger
+	costCenters []config.CustomPropCostCenter
 }
 
-// NewCustomPropertyManager creates a CustomPropertyManager from configuration.
+// NewManager creates a Manager from configuration.
 // It returns an error if no custom-property cost centers are configured.
-func NewCustomPropertyManager(cfg *config.Manager, client *github.Client, logger *slog.Logger) (*CustomPropertyManager, error) {
-	if len(cfg.CustomPropertyCostCenters) == 0 {
-		return nil, fmt.Errorf("custom-property mode requires at least one entry in the 'cost-centers' config section")
+func NewManager(cfg *config.Manager, client *github.Client, logger *slog.Logger) (*Manager, error) {
+	if len(cfg.CustomPropCostCenters) == 0 {
+		return nil, fmt.Errorf("custom-prop mode requires at least one entry in cost_center.custom_prop.cost_centers")
 	}
-	return &CustomPropertyManager{
-		cfg:        cfg,
-		client:     client,
-		log:        logger,
-		costCenters: cfg.CustomPropertyCostCenters,
+	return &Manager{
+		cfg:         cfg,
+		client:      client,
+		log:         logger,
+		costCenters: cfg.CustomPropCostCenters,
 	}, nil
 }
 
 // ValidateConfiguration checks the custom-property cost center definitions and
 // returns a list of human-readable issues found.
-func (m *CustomPropertyManager) ValidateConfiguration() []string {
+func (m *Manager) ValidateConfiguration() []string {
 	var issues []string
 	seen := make(map[string]bool, len(m.costCenters))
 	for i, cc := range m.costCenters {
 		if cc.Name == "" {
 			issues = append(issues, fmt.Sprintf("cost center %d: missing name", i+1))
-		}
-		if cc.Type != "custom-property" {
-			issues = append(issues, fmt.Sprintf("cost center %d (%q): unsupported type %q", i+1, cc.Name, cc.Type))
 		}
 		if len(cc.Filters) == 0 {
 			issues = append(issues, fmt.Sprintf("cost center %d (%q): no filters defined", i+1, cc.Name))
@@ -112,7 +111,7 @@ func (m *CustomPropertyManager) ValidateConfiguration() []string {
 }
 
 // PrintConfigSummary displays the custom-property configuration.
-func (m *CustomPropertyManager) PrintConfigSummary(org string) {
+func (m *Manager) PrintConfigSummary(org string) {
 	fmt.Println()
 	fmt.Println(strings.Repeat("=", 80))
 	fmt.Println("Custom-Property Cost Center Assignment")
@@ -131,7 +130,7 @@ func (m *CustomPropertyManager) PrintConfigSummary(org string) {
 
 // Run executes the full custom-property assignment flow.
 // mode is "plan" or "apply".  createBudgets enables budget creation for new CCs.
-func (m *CustomPropertyManager) Run(org, mode string, createBudgets bool) (*CustomPropertySummary, error) {
+func (m *Manager) Run(org, mode string, createBudgets bool) (*Summary, error) {
 	m.log.Info("Starting custom-property cost center assignment",
 		"org", org, "mode", mode, "cost_centers", len(m.costCenters))
 
@@ -143,7 +142,7 @@ func (m *CustomPropertyManager) Run(org, mode string, createBudgets bool) (*Cust
 	}
 	if len(allRepos) == 0 {
 		m.log.Warn("No repositories found", "org", org)
-		return &CustomPropertySummary{TotalRepos: 0, TotalCCs: len(m.costCenters)}, nil
+		return &Summary{TotalRepos: 0, TotalCCs: len(m.costCenters)}, nil
 	}
 	m.log.Info("Repositories found", "org", org, "count", len(allRepos))
 
@@ -154,7 +153,7 @@ func (m *CustomPropertyManager) Run(org, mode string, createBudgets bool) (*Cust
 	}
 	m.log.Info("Existing cost centers loaded", "count", len(activeCCs))
 
-	summary := &CustomPropertySummary{
+	summary := &Summary{
 		TotalRepos: len(allRepos),
 		TotalCCs:   len(m.costCenters),
 	}
@@ -177,14 +176,14 @@ func (m *CustomPropertyManager) Run(org, mode string, createBudgets bool) (*Cust
 
 // processCostCenter handles one custom-property cost center — finds matching
 // repos and (in apply mode) ensures the CC exists and assigns the repos.
-func (m *CustomPropertyManager) processCostCenter(
-	cc config.CustomPropertyCostCenter,
+func (m *Manager) processCostCenter(
+	cc config.CustomPropCostCenter,
 	allRepos []github.RepoProperties,
 	activeCCs map[string]string,
 	mode string,
 	createBudgets bool,
-) CustomPropertyResult {
-	result := CustomPropertyResult{
+) Result {
+	result := Result{
 		CostCenter: cc.Name,
 		Filters:    cc.Filters,
 	}
@@ -281,7 +280,7 @@ func (m *CustomPropertyManager) processCostCenter(
 }
 
 // createBudgets creates configured budgets for a newly-created cost center.
-func (m *CustomPropertyManager) createBudgets(ccID, ccName string) {
+func (m *Manager) createBudgets(ccID, ccName string) {
 	m.log.Info("Creating budgets for cost center", "name", ccName)
 
 	for product, pc := range m.cfg.BudgetProducts {
@@ -307,8 +306,8 @@ func (m *CustomPropertyManager) createBudgets(ccID, ccName string) {
 	}
 }
 
-// findReposMatchingAllFilters returns the repos from repos that satisfy every
-// filter in filters (AND logic).
+// findReposMatchingAllFilters returns the repos that satisfy every filter
+// (AND logic).
 func findReposMatchingAllFilters(
 	repos []github.RepoProperties,
 	filters []config.CustomPropertyFilter,
@@ -329,7 +328,6 @@ func findReposMatchingAllFilters(
 // repoMatchesAllFilters returns true when the repository satisfies every
 // filter (AND logic).
 func repoMatchesAllFilters(repo github.RepoProperties, filters []config.CustomPropertyFilter) bool {
-	// Build a property lookup map for this repo.
 	propMap := make(map[string]any, len(repo.Properties))
 	for _, p := range repo.Properties {
 		propMap[p.PropertyName] = p.Value
@@ -340,9 +338,25 @@ func repoMatchesAllFilters(repo github.RepoProperties, filters []config.CustomPr
 		if !exists {
 			return false
 		}
-		if !matchesValue(val, map[string]bool{f.Value: true}) {
+		if !matchesValue(val, f.Value) {
 			return false
 		}
 	}
 	return true
+}
+
+// matchesValue checks if a property value (string or []any) matches the
+// expected value.
+func matchesValue(val any, expected string) bool {
+	switch v := val.(type) {
+	case string:
+		return v == expected
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok && s == expected {
+				return true
+			}
+		}
+	}
+	return false
 }

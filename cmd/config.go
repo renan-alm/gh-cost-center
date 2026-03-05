@@ -13,8 +13,8 @@ var configCmd = &cobra.Command{
 	Short: "Show current configuration",
 	Long: `Display the current configuration and exit.
 
-Shows enterprise, cost center IDs, PRU exception users, teams settings,
-and other configuration details.
+Shows enterprise, cost center mode, organizations, and mode-specific
+configuration details.
 
 Examples:
   gh cost-center config
