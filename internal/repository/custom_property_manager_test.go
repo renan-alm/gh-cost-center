@@ -320,7 +320,11 @@ func TestFindReposMatchingAllFilters_NoMatch(t *testing.T) {
 
 func TestFindReposMatchingAllFilters_EmptyFilters(t *testing.T) {
 	repos := []github.RepoProperties{
-		{RepositoryName: "repo1", Properties: []github.Property{{PropertyName: "team", Value: "backend"}}},
+		{
+			RepositoryName:     "repo1",
+			RepositoryFullName: "org/repo1",
+			Properties:         []github.Property{{PropertyName: "team", Value: "backend"}},
+		},
 	}
 
 	matched := findReposMatchingAllFilters(repos, nil)
