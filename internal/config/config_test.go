@@ -707,6 +707,7 @@ export_dir: "` + dir + `"
 	}
 	if got == nil {
 		t.Fatal("got nil timestamp")
+		return
 	}
 	if !got.Equal(ts) {
 		t.Errorf("timestamp = %v, want %v", got, ts)

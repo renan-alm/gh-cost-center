@@ -21,6 +21,7 @@ func TestNew_CreatesEmptyCache(t *testing.T) {
 	}
 	if c == nil {
 		t.Fatal("expected non-nil cache")
+		return
 	}
 	if len(c.data.Entries) != 0 {
 		t.Errorf("expected 0 entries, got %d", len(c.data.Entries))

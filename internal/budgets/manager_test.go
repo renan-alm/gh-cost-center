@@ -41,6 +41,7 @@ func TestNewManager(t *testing.T) {
 	mgr := NewManager(nil, testLogger(), products)
 	if mgr == nil {
 		t.Fatal("expected non-nil manager")
+		return
 	}
 	if len(mgr.products) != 2 {
 		t.Errorf("expected 2 products, got %d", len(mgr.products))
