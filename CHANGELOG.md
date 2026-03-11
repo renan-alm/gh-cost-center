@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ## [2.1.0] - 2026-03-10
+## [2.1.0] - 2026-03-11
+
+### Other
+
+- d2557bbf94949d6e0459e7912684f63f33aa0c75\ndocs: update CHANGELOG for v2.1.0\n\n---COMMIT_END--- (4102c86)
+
 
 ### Fixed — Error Propagation & Exit Codes
 - **Partial assignment failures now exit 1** — `logAssignmentResults` returns an error when any user assignments fail, so CI/CD pipelines correctly detect incomplete runs
