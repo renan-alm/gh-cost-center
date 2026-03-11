@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ## [2.1.0] - 2026-03-10
+## [2.1.0] - 2026-03-11
+
+### Added
+
+- Fail fast approach, logs refactoring and add tests (34ad3e0)
+
+### Changed
+
+- Update project version to 2.0.0 (08038f6)
+
+### Fixed
+
+- repair release workflow parsing and clean up CHANGELOG for v2.1.0 (55c8b82)
+- resolve cost center names to UUIDs when auto_create is disabled (7af8f73)
+
 
 ### Fixed — Error Propagation & Exit Codes
 - **Partial assignment failures now exit 1** — `logAssignmentResults` returns an error when any user assignments fail, so CI/CD pipelines correctly detect incomplete runs
