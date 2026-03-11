@@ -145,7 +145,8 @@ jobs:
             # Use a unique delimiter that won't appear in commit messages
             DELIM="---COMMIT_END---"
             
-            git log --format="%H\n%s\n%b\n$DELIM" "$PREV_TAG".."$CURRENT_TAG" | while IFS= read -r hash; do
+            # NOTE: git --format uses %n for newline (not \n which outputs literal backslash-n)
+            git log --format="%H%n%s%n%b%n$DELIM" "$PREV_TAG".."$CURRENT_TAG" | while IFS= read -r hash; do
               # Read subject line
               IFS= read -r subject || true
               
@@ -163,22 +164,23 @@ jobs:
                 categorize_line "$subject" "$short_hash"
               else
                 # Check for conventional commits in the body (e.g., squash merge descriptions)
-                found_in_body=false
-                echo "$body" | while IFS= read -r line; do
+                # Use a temp file as flag to avoid subshell variable scoping issues with pipes
+                rm -f /tmp/found_in_body
+                while IFS= read -r line; do
                   # Look for lines starting with conventional commit prefixes
                   if echo "$line" | grep -qE '^\* (feat|fix|refactor|perf|build|ci|style|docs|test|chore|revert)(\([^)]*\))?!?:'; then
                     # Remove the leading "* " from squash merge format
                     clean_line=$(echo "$line" | sed 's/^\* //')
                     categorize_line "$clean_line" "$short_hash"
-                    found_in_body=true
+                    touch /tmp/found_in_body
                   elif echo "$line" | grep -qE '^(feat|fix|refactor|perf|build|ci|style|docs|test|chore|revert)(\([^)]*\))?!?:'; then
                     categorize_line "$line" "$short_hash"
-                    found_in_body=true
+                    touch /tmp/found_in_body
                   fi
-                done
+                done <<< "$body"
                 
                 # If nothing found in body and subject isn't a merge commit, add subject to other
-                if [ "$found_in_body" = false ] && ! echo "$subject" | grep -qE '^Merge (pull request|branch)'; then
+                if [ ! -f /tmp/found_in_body ] && ! echo "$subject" | grep -qE '^Merge (pull request|branch)'; then
                   categorize_line "$subject" "$short_hash"
                 fi
               fi

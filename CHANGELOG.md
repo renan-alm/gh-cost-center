@@ -8,12 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ## [2.1.0] - 2026-03-10
-## [2.1.0] - 2026-03-11
-
-### Other
-
-- d2557bbf94949d6e0459e7912684f63f33aa0c75\ndocs: update CHANGELOG for v2.1.0\n\n---COMMIT_END--- (4102c86)
-
 
 ### Fixed — Error Propagation & Exit Codes
 - **Partial assignment failures now exit 1** — `logAssignmentResults` returns an error when any user assignments fail, so CI/CD pipelines correctly detect incomplete runs
@@ -31,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cache log levels lowered to DEBUG** — `Cache cleared` and `Cleanup complete` now use DEBUG, consistent with other cache operations
 - **Added fallback context in teams manager** — WARN log when falling back to cost center name as ID
 
-### Fixed — Cost Center Name→UUID Resolution
+### Fixed — Cost Center Name-to-UUID Resolution
 - **`auto_create: false` now resolves names to UUIDs** — when `auto_create` is disabled (teams and PRU modes), cost center names are resolved to UUIDs via the billing API instead of being passed directly in API URLs. Previously, names with non-ASCII characters were sent as UUIDs, causing 404 errors.
 - **Sync aborts on unresolved names** — if any cost center name cannot be resolved, the sync fails fast with an actionable error listing all unresolved names and suggesting to enable `auto_create` or verify names in billing settings
 - **UUID validation guards on API calls** — `GetCostCenter()`, `AddUsersToCostCenter()`, and `RemoveUsersFromCostCenter()` now validate that IDs look like UUIDs before making HTTP requests; non-UUID values (including those with non-ASCII characters) are rejected with a descriptive error
