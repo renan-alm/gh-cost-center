@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.1.0] - 2026-03-10
+### Added
+
+- **`github.concurrency` config setting** — controls the maximum number of
+  concurrent GitHub API workers used when fetching team members and repository
+  properties.  Defaults to `5`.  Increase to speed up large-scale syncs;
+  decrease if secondary rate limits are hit frequently.
+- **Concurrent team-member fetching** — `BuildTeamAssignments` now dispatches
+  member-fetch requests to a bounded worker pool (size = `github.concurrency`)
+  instead of fetching teams sequentially.  On enterprises with hundreds of
+  teams this dramatically reduces sync time.  Teams are sorted before dispatch
+  to ensure deterministic `last-team-wins` semantics.
+
+### Changed
+
+- **Secondary rate limit handling** — `403 + Retry-After` responses (GitHub
+  abuse-detection / concurrent-request throttling) are now retried
+  transparently, the same as `429 Too Many Requests`.  Previously these were
+  treated as non-retryable errors.
+- **`Retry-After` header takes precedence** — `rateLimitWait` checks
+  `Retry-After` before `X-RateLimit-Reset`, matching GitHub's documented
+  priority order for both primary and secondary rate limits.
+- **Proactive rate-limit warning** — after every successful response the client
+  reads `X-RateLimit-Remaining`.  When it drops below `100`, a `WARN` log is
+  emitted so operators can act before the hard limit is hit.
+
 ## [2.1.0] - 2026-03-11
 
 ### Added
