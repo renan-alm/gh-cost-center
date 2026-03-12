@@ -217,6 +217,28 @@ github:
   # api_base_url: "https://github.company.com/api/v3"
 ```
 
+### Concurrency
+
+The tool fetches team members (and repository properties) in parallel using a
+bounded worker pool.  The default of 5 concurrent workers suits most
+enterprises.  Increase it to speed up large-scale syncs, or decrease it if
+secondary rate limits are hit frequently.
+
+```yaml
+github:
+  enterprise: "your-enterprise"
+  concurrency: 10   # default: 5
+```
+
+**Rate limit behaviour** — the client handles GitHub rate limits automatically:
+
+| Condition | Behaviour |
+|-----------|-----------|
+| `429 Too Many Requests` | Waits until `X-RateLimit-Reset`, then retries (unlimited) |
+| `403 + Retry-After` (secondary / abuse) | Waits the specified delay, then retries (unlimited) |
+| `X-RateLimit-Remaining < 100` | Emits a `WARN` log so you can act before the quota is exhausted |
+| Transient network errors | Exponential back-off, up to 3 retries |
+
 ## Exit Codes
 
 | Code | Meaning |
@@ -237,6 +259,9 @@ Partial failures (e.g., 2 of 10 users failed to assign) produce exit code `1` wi
 | Special characters in cost center names (ü, ö, ä) | Names with non-ASCII characters work correctly — they are resolved to UUIDs before API calls, so special characters never appear in API URLs. |
 | Exit code 1 on partial failures | Expected behavior — some user assignments or budget creations failed. Check the error summary for details. |
 | Budget API unavailable (404) | The Budgets API may not be enabled for your enterprise. Budget creation is skipped gracefully with a warning. |
+| Frequent `403 secondary rate limit` messages | GitHub's abuse-detection triggers when too many API requests are made in a short window. The client waits and retries automatically. Reduce `github.concurrency` (default `5`) if the issue persists. |
+| `WARN: GitHub API rate limit running low` | The primary rate limit quota is almost exhausted (< 100 requests remaining). Lower `github.concurrency` or schedule runs during off-peak hours. |
+| Sync is slow on large enterprises | Increase `github.concurrency` beyond the default of `5` to fetch team members in parallel. Monitor for secondary rate limit warnings if you raise it significantly. |
 
 Enable debug logging:
 

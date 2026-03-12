@@ -38,6 +38,14 @@ github:
   #   - "my-org-1"
   #   - "my-org-2"
 
+  # Maximum number of concurrent GitHub API workers (optional).
+  # Controls how many team-member or repository fetch requests run in
+  # parallel.  Higher values speed up large enterprises with many teams,
+  # but increase API quota consumption.  Reduce if you hit secondary rate
+  # limits (403 + Retry-After) frequently.
+  # Default: 5
+  # concurrency: 5
+
 # ============================================================
 # Cost Center Configuration
 # ============================================================

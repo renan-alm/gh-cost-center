@@ -23,6 +23,9 @@ All examples use `--mode plan` (dry-run). Replace with `--mode apply --yes` when
   - [6c. Repos Mode with Multiple Properties](#6c-repos-mode-with-multiple-properties)
   - [6d. Custom-Prop with AND Filters + Budgets](#6d-custom-prop-with-and-filters--budgets)
   - [6e. GHE Data Resident / GHES with Teams](#6e-ghe-data-resident--ghes-with-teams)
+- [Quick Reference: Key Flags](#quick-reference-key-flags)
+- [Performance & Scalability](#performance--scalability)
+- [Verifying Your Config](#verifying-your-config)
 
 ---
 
@@ -521,6 +524,42 @@ gh cost-center assign --mode plan
 | `--verbose` / `-v` | Enable debug logging |
 
 > **Note:** The active mode (users, teams, repos, custom-prop) is determined by `cost_center.mode` in your config file, not by CLI flags.
+
+---
+
+## Performance & Scalability
+
+By default the tool fetches team members (and repository properties) using
+**5 concurrent API workers** (`github.concurrency: 5`).  This is a good
+default for most enterprises, but you can tune it:
+
+```yaml
+github:
+  enterprise: "my-enterprise"
+  concurrency: 10   # increase for faster syncs on large enterprises
+```
+
+**When to increase `concurrency`**
+- You have hundreds of teams and the sync takes several minutes.
+- The verbose log shows "Fetching members for team…" messages executing one
+  after another rather than in batches.
+
+**When to decrease `concurrency`**
+- You see repeated `WARN: secondary rate limit hit (403)` messages.
+- Your enterprise has strict API rate limit policies.
+
+**Rate limit handling** — the client handles both rate limit types automatically
+without any configuration:
+
+| Condition | What happens |
+|-----------|-------------|
+| `429 Too Many Requests` | Waits until `X-RateLimit-Reset`, then retries |
+| `403 + Retry-After` (secondary / abuse detection) | Waits the specified delay, then retries |
+| `X-RateLimit-Remaining < 100` | Emits a `WARN` log — no action needed, informational only |
+| Transient network error | Exponential back-off, up to 3 retries |
+
+All rate limit waits are budget-free — they do **not** count toward the 3
+transient-error retry limit.
 
 ---
 
