@@ -178,3 +178,48 @@ logging:
 # Directory for export files and the incremental-run timestamp.
 # Default: "exports"
 # export_dir: "exports"
+
+# ============================================================
+# Repository Custom Property Definitions (Optional)
+# ============================================================
+# Declare the GitHub repository custom property schemas used by
+# your organization.  These definitions are informational and are
+# used to validate that property names referenced in
+# cost_center.repos.mappings and cost_center.custom_prop filters
+# actually exist.
+#
+# value_type must be one of:
+#   "string"        — free-form text
+#   "single_select" — one option from allowed_values (required)
+#   "multi_select"  — one or more options from allowed_values (required)
+#   "true_false"    — boolean
+#
+# repo_custom_properties:
+#   - name: "team"
+#     value_type: "single_select"
+#     required: true
+#     description: "Owning team slug"
+#     allowed_values:
+#       - "backend"
+#       - "frontend"
+#       - "platform"
+#
+#   - name: "environment"
+#     value_type: "single_select"
+#     required: false
+#     default_value: "development"
+#     description: "Deployment environment"
+#     allowed_values:
+#       - "production"
+#       - "staging"
+#       - "development"
+#
+#   - name: "cost-center-id"
+#     value_type: "string"
+#     required: false
+#     description: "Direct cost center identifier"
+#
+#   - name: "archived"
+#     value_type: "true_false"
+#     required: false
+#     description: "Whether the repository is archived"
