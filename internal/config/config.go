@@ -80,7 +80,8 @@ type Manager struct {
 	ReposMappings []ExplicitMapping
 
 	// Custom-prop mode fields.
-	CustomPropCostCenters []CustomPropCostCenter
+	CustomPropCostCenters     []CustomPropCostCenter
+	CustomPropRemoveUnmatched bool
 
 	// Budgets.
 	BudgetsEnabled bool
@@ -351,6 +352,7 @@ func (m *Manager) resolveCustomPropMode() error {
 	}
 
 	m.CustomPropCostCenters = cp.CostCenters
+	m.CustomPropRemoveUnmatched = cp.RemoveUnmatchedRepos
 	m.log.Info("Custom-prop mode enabled", "cost_centers", len(cp.CostCenters))
 	return nil
 }
@@ -499,6 +501,7 @@ func (m *Manager) Summary() map[string]any {
 
 	case "custom-prop":
 		s["custom_prop_cost_centers_count"] = len(m.CustomPropCostCenters)
+		s["custom_prop_remove_unmatched_repos"] = m.CustomPropRemoveUnmatched
 	}
 
 	if len(m.RepoCustomProperties) > 0 {

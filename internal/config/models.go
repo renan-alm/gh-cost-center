@@ -3,12 +3,12 @@ package config
 
 // Config is the top-level configuration structure that mirrors the YAML file.
 type Config struct {
-	GitHub               GitHubConfig              `yaml:"github"`
-	CostCenter           CostCenterConfig          `yaml:"cost_center"`
-	Budgets              BudgetsConfig             `yaml:"budgets"`
-	Logging              LoggingConfig             `yaml:"logging"`
-	ExportDir            string                    `yaml:"export_dir"`
-	RepoCustomProperties []RepoCustomPropertyDef   `yaml:"repo_custom_properties"`
+	GitHub               GitHubConfig            `yaml:"github"`
+	CostCenter           CostCenterConfig        `yaml:"cost_center"`
+	Budgets              BudgetsConfig           `yaml:"budgets"`
+	Logging              LoggingConfig           `yaml:"logging"`
+	ExportDir            string                  `yaml:"export_dir"`
+	RepoCustomProperties []RepoCustomPropertyDef `yaml:"repo_custom_properties"`
 }
 
 // GitHubConfig holds GitHub-related settings.
@@ -61,7 +61,8 @@ type ExplicitMapping struct {
 
 // CustomPropConfig holds AND-filter custom-property cost center definitions.
 type CustomPropConfig struct {
-	CostCenters []CustomPropCostCenter `yaml:"cost_centers"`
+	CostCenters          []CustomPropCostCenter `yaml:"cost_centers"`
+	RemoveUnmatchedRepos bool                   `yaml:"remove_unmatched_repos"`
 }
 
 // CustomPropCostCenter defines a cost center discovered via GitHub custom

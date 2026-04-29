@@ -132,6 +132,10 @@ cost_center:
   # combinations, add separate entries.
   #
   # custom_prop:
+  #   # Remove repos from a cost center when they no longer match its filters.
+  #   # Default: false (only adds, never removes).
+  #   remove_unmatched_repos: false
+  #
   #   cost_centers:
   #     - name: "Backend Engineering"
   #       filters:

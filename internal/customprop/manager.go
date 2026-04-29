@@ -20,6 +20,8 @@ type Result struct {
 	Filters       []config.CustomPropertyFilter
 	ReposMatched  int
 	ReposAssigned int
+	ReposSkipped  int
+	ReposRemoved  int
 	Success       bool
 	Message       string
 }
@@ -50,6 +52,12 @@ func (s *Summary) Print() {
 		}
 		fmt.Printf("  Matched:   %d repositories\n", r.ReposMatched)
 		fmt.Printf("  Assigned:  %d repositories\n", r.ReposAssigned)
+		if r.ReposSkipped > 0 {
+			fmt.Printf("  Skipped:   %d repositories (missing full name)\n", r.ReposSkipped)
+		}
+		if r.ReposRemoved > 0 {
+			fmt.Printf("  Removed:   %d repositories (no longer match filters)\n", r.ReposRemoved)
+		}
 		if r.Success {
 			fmt.Println("  Status:    Success")
 		} else {
@@ -110,6 +118,49 @@ func (m *Manager) ValidateConfiguration() []string {
 	return issues
 }
 
+// ValidateFiltersAgainstSchema checks that filter property names and values
+// are consistent with the repo custom property schema definitions.  Returns
+// human-readable warnings (not errors) because the schema may be incomplete.
+func (m *Manager) ValidateFiltersAgainstSchema(schema []config.RepoCustomPropertyDef) []string {
+	if len(schema) == 0 {
+		return nil
+	}
+
+	// Build lookup maps from schema.
+	schemaDefs := make(map[string]config.RepoCustomPropertyDef, len(schema))
+	for _, d := range schema {
+		schemaDefs[d.Name] = d
+	}
+
+	var warnings []string
+	for _, cc := range m.costCenters {
+		for _, f := range cc.Filters {
+			def, exists := schemaDefs[f.Property]
+			if !exists {
+				warnings = append(warnings, fmt.Sprintf(
+					"cost center %q: filter property %q is not defined in repo_custom_properties schema",
+					cc.Name, f.Property))
+				continue
+			}
+			if len(def.AllowedValues) > 0 {
+				found := false
+				for _, v := range def.AllowedValues {
+					if v == f.Value {
+						found = true
+						break
+					}
+				}
+				if !found {
+					warnings = append(warnings, fmt.Sprintf(
+						"cost center %q: filter value %q for property %q is not in allowed_values %v",
+						cc.Name, f.Value, f.Property, def.AllowedValues))
+				}
+			}
+		}
+	}
+	return warnings
+}
+
 // PrintConfigSummary displays the custom-property configuration.
 func (m *Manager) PrintConfigSummary(org string) {
 	fmt.Println()
@@ -126,6 +177,41 @@ func (m *Manager) PrintConfigSummary(org string) {
 		}
 	}
 	fmt.Println(strings.Repeat("=", 80))
+}
+
+// GenerateSummary produces a read-only summary of which repositories match
+// each custom-property cost center.  It does NOT create or assign anything.
+func (m *Manager) GenerateSummary(org string) (*Summary, error) {
+	m.log.Info("Generating custom-property cost center summary", "org", org)
+
+	allRepos, err := m.client.GetOrgReposWithProperties(org, "")
+	if err != nil {
+		return nil, fmt.Errorf("fetching repos with properties: %w", err)
+	}
+
+	summary := &Summary{
+		TotalRepos: len(allRepos),
+		TotalCCs:   len(m.costCenters),
+	}
+
+	for _, cc := range m.costCenters {
+		matching := findReposMatchingAllFilters(allRepos, cc.Filters)
+		result := Result{
+			CostCenter:    cc.Name,
+			Filters:       cc.Filters,
+			ReposMatched:  len(matching),
+			ReposAssigned: len(matching),
+			Success:       true,
+			Message:       fmt.Sprintf("%d repositories match", len(matching)),
+		}
+		if len(matching) == 0 {
+			result.Message = "no repositories matched all filters"
+		}
+		summary.AppliedCCs++
+		summary.Results = append(summary.Results, result)
+	}
+
+	return summary, nil
 }
 
 // Run executes the full custom-property assignment flow.
@@ -248,6 +334,7 @@ func (m *Manager) processCostCenter(
 		if r.RepositoryFullName != "" {
 			repoNames = append(repoNames, r.RepositoryFullName)
 		} else {
+			result.ReposSkipped++
 			m.log.Warn("Repository missing full name, skipping", "name", r.RepositoryName)
 		}
 	}
@@ -280,7 +367,55 @@ func (m *Manager) processCostCenter(
 	m.log.Info("Successfully assigned repos",
 		"cost_center", cc.Name, "assigned", len(repoNames))
 
+	// Remove repos that no longer match filters (if enabled).
+	if m.cfg.CustomPropRemoveUnmatched {
+		removed, err := m.removeUnmatchedRepos(ccID, cc.Name, repoNames)
+		if err != nil {
+			m.log.Error("Failed to remove unmatched repos", "cost_center", cc.Name, "error", err)
+		} else {
+			result.ReposRemoved = removed
+		}
+	}
+
 	return result
+}
+
+// removeUnmatchedRepos removes repositories that are currently in the cost
+// center but no longer match the filters.
+func (m *Manager) removeUnmatchedRepos(ccID, ccName string, matchedRepos []string) (int, error) {
+	currentRepos, err := m.client.GetCostCenterRepos(ccID)
+	if err != nil {
+		return 0, fmt.Errorf("fetching current repos for %s: %w", ccName, err)
+	}
+
+	matchedSet := make(map[string]bool, len(matchedRepos))
+	for _, r := range matchedRepos {
+		matchedSet[r] = true
+	}
+
+	var stale []string
+	for _, r := range currentRepos {
+		if !matchedSet[r] {
+			stale = append(stale, r)
+		}
+	}
+
+	if len(stale) == 0 {
+		m.log.Info("No unmatched repos to remove", "cost_center", ccName)
+		return 0, nil
+	}
+
+	m.log.Info("Removing unmatched repos from cost center",
+		"cost_center", ccName, "count", len(stale))
+	for _, r := range stale {
+		m.log.Debug("Removing repo", "repo", r, "cost_center", ccName)
+	}
+
+	if err := m.client.RemoveRepositoriesFromCostCenter(ccID, stale); err != nil {
+		return 0, fmt.Errorf("removing unmatched repos from %s: %w", ccName, err)
+	}
+
+	return len(stale), nil
 }
 
 // createBudgets creates configured budgets for a newly-created cost center.

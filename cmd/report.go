@@ -6,6 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/renan-alm/gh-cost-center/internal/cache"
+	"github.com/renan-alm/gh-cost-center/internal/customprop"
 	"github.com/renan-alm/gh-cost-center/internal/github"
 	"github.com/renan-alm/gh-cost-center/internal/pru"
 	"github.com/renan-alm/gh-cost-center/internal/teams"
@@ -29,8 +31,13 @@ func init() {
 }
 
 func runReport(_ *cobra.Command, _ []string) error {
-	if cfgManager.CostCenterMode == "teams" {
+	switch cfgManager.CostCenterMode {
+	case "teams":
 		return runTeamsReport()
+	case "custom-prop":
+		return runCustomPropReport()
+	default:
+		// "users" (PRU) is the default
 	}
 
 	logger := slog.Default()
@@ -80,6 +87,40 @@ func runTeamsReport() error {
 	}
 
 	summary.Print(cfgManager.Enterprise)
+
+	return nil
+}
+
+// runCustomPropReport generates a custom-property cost center summary.
+func runCustomPropReport() error {
+	logger := slog.Default()
+
+	if len(cfgManager.Organizations) == 0 {
+		return fmt.Errorf("custom-prop mode requires at least one organization in github.organizations config")
+	}
+	org := cfgManager.Organizations[0]
+
+	client, err := github.NewClient(cfgManager, logger)
+	if err != nil {
+		return fmt.Errorf("creating GitHub client: %w", err)
+	}
+
+	cc, cacheErr := cache.New("", logger)
+	if cacheErr == nil {
+		client.SetCache(cc)
+	}
+
+	cpMgr, err := customprop.NewManager(cfgManager, client, logger)
+	if err != nil {
+		return fmt.Errorf("initializing custom-property manager: %w", err)
+	}
+
+	summary, err := cpMgr.GenerateSummary(org)
+	if err != nil {
+		return fmt.Errorf("generating custom-property summary: %w", err)
+	}
+
+	summary.Print()
 
 	return nil
 }

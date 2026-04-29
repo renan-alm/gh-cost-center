@@ -558,6 +558,53 @@ cost_center:
 	}
 }
 
+func TestLoad_CustomPropModeRemoveUnmatched(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+  organizations: ["org"]
+cost_center:
+  mode: "custom-prop"
+  custom_prop:
+    remove_unmatched_repos: true
+    cost_centers:
+      - name: "Backend"
+        filters:
+          - property: "team"
+            value: "backend"
+`
+	m, err := Load(writeConfig(t, yaml), logger())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !m.CustomPropRemoveUnmatched {
+		t.Error("expected CustomPropRemoveUnmatched = true")
+	}
+}
+
+func TestLoad_CustomPropModeRemoveUnmatchedDefault(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+  organizations: ["org"]
+cost_center:
+  mode: "custom-prop"
+  custom_prop:
+    cost_centers:
+      - name: "Backend"
+        filters:
+          - property: "team"
+            value: "backend"
+`
+	m, err := Load(writeConfig(t, yaml), logger())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if m.CustomPropRemoveUnmatched {
+		t.Error("expected CustomPropRemoveUnmatched = false by default")
+	}
+}
+
 // ---------- Invalid mode ----------
 
 func TestLoad_InvalidMode(t *testing.T) {

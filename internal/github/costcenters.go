@@ -512,6 +512,46 @@ func (c *Client) AddRepositoriesToCostCenter(costCenterID string, repoNames []st
 	return nil
 }
 
+// RemoveRepositoriesFromCostCenter removes repository full-names (org/repo)
+// from a cost center.
+func (c *Client) RemoveRepositoriesFromCostCenter(costCenterID string, repoNames []string) error {
+	if len(repoNames) == 0 {
+		return nil
+	}
+
+	c.log.Info("Removing repositories from cost center",
+		"cost_center_id", costCenterID, "count", len(repoNames))
+
+	url := c.enterpriseURL(fmt.Sprintf("/settings/billing/cost-centers/%s/resource", costCenterID))
+	body := map[string]any{"repositories": repoNames}
+
+	_, err := c.doJSON(http.MethodDelete, url, body, nil)
+	if err != nil {
+		return fmt.Errorf("removing repositories from cost center %s: %w", costCenterID, err)
+	}
+
+	c.log.Info("Successfully removed repositories from cost center",
+		"cost_center_id", costCenterID, "count", len(repoNames))
+	return nil
+}
+
+// GetCostCenterRepos returns the repository names assigned to the given
+// cost center.
+func (c *Client) GetCostCenterRepos(id string) ([]string, error) {
+	detail, err := c.GetCostCenter(id)
+	if err != nil {
+		return nil, err
+	}
+	var repos []string
+	for _, r := range detail.Resources {
+		if r.Type == "Repository" && r.Name != "" {
+			repos = append(repos, r.Name)
+		}
+	}
+	c.log.Debug("Cost center repositories", "cost_center_id", id, "count", len(repos))
+	return repos, nil
+}
+
 // toSet converts a string slice to a set (map[string]bool).
 func toSet(ss []string) map[string]bool {
 	m := make(map[string]bool, len(ss))
