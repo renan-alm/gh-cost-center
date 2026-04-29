@@ -80,7 +80,8 @@ type Manager struct {
 	ReposMappings []ExplicitMapping
 
 	// Custom-prop mode fields.
-	CustomPropCostCenters []CustomPropCostCenter
+	CustomPropCostCenters     []CustomPropCostCenter
+	CustomPropRemoveUnmatched bool
 
 	// Budgets.
 	BudgetsEnabled bool
@@ -93,6 +94,10 @@ type Manager struct {
 
 	// Token from --token flag.
 	Token string
+
+	// RepoCustomProperties holds the optional GitHub repo custom property
+	// schema definitions loaded from the config file.
+	RepoCustomProperties []RepoCustomPropertyDef
 
 	timestampFile string
 }
@@ -237,6 +242,11 @@ func (m *Manager) resolve() error {
 	m.ExportDir = defaultString(m.cfg.ExportDir, DefaultExportDir)
 	m.timestampFile = filepath.Join(m.ExportDir, timestampFileName)
 
+	// --- Repo custom properties ---
+	if err := m.resolveRepoCustomProperties(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -342,7 +352,25 @@ func (m *Manager) resolveCustomPropMode() error {
 	}
 
 	m.CustomPropCostCenters = cp.CostCenters
+	m.CustomPropRemoveUnmatched = cp.RemoveUnmatchedRepos
 	m.log.Info("Custom-prop mode enabled", "cost_centers", len(cp.CostCenters))
+	return nil
+}
+
+// resolveRepoCustomProperties validates and stores repo custom property definitions.
+func (m *Manager) resolveRepoCustomProperties() error {
+	defs := m.cfg.RepoCustomProperties
+	if len(defs) == 0 {
+		m.RepoCustomProperties = []RepoCustomPropertyDef{}
+		return nil
+	}
+
+	if err := validateRepoCustomProperties(defs); err != nil {
+		return err
+	}
+
+	m.RepoCustomProperties = defs
+	m.log.Info("Repo custom property definitions loaded", "count", len(defs))
 	return nil
 }
 
@@ -473,6 +501,11 @@ func (m *Manager) Summary() map[string]any {
 
 	case "custom-prop":
 		s["custom_prop_cost_centers_count"] = len(m.CustomPropCostCenters)
+		s["custom_prop_remove_unmatched_repos"] = m.CustomPropRemoveUnmatched
+	}
+
+	if len(m.RepoCustomProperties) > 0 {
+		s["repo_custom_properties_count"] = len(m.RepoCustomProperties)
 	}
 
 	return s
@@ -481,6 +514,59 @@ func (m *Manager) Summary() map[string]any {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// validPropertyValueTypes holds the GitHub-supported custom property value types.
+var validPropertyValueTypes = map[string]bool{
+	"string":        true,
+	"single_select": true,
+	"multi_select":  true,
+	"true_false":    true,
+}
+
+// selectPropertyValueTypes are the types that support allowed_values.
+var selectPropertyValueTypes = map[string]bool{
+	"single_select": true,
+	"multi_select":  true,
+}
+
+// validateRepoCustomProperties validates the repo custom property definitions.
+func validateRepoCustomProperties(defs []RepoCustomPropertyDef) error {
+	seen := make(map[string]bool, len(defs))
+	for i, d := range defs {
+		if d.Name == "" {
+			return fmt.Errorf("repo_custom_properties[%d]: missing 'name'", i)
+		}
+		if seen[d.Name] {
+			return fmt.Errorf("repo_custom_properties: duplicate property name %q", d.Name)
+		}
+		seen[d.Name] = true
+
+		if d.ValueType == "" {
+			return fmt.Errorf("repo_custom_properties[%d] (%q): missing 'value_type'", i, d.Name)
+		}
+		if !validPropertyValueTypes[d.ValueType] {
+			return fmt.Errorf(
+				"repo_custom_properties[%d] (%q): invalid value_type %q: must be one of: string, single_select, multi_select, true_false",
+				i, d.Name, d.ValueType,
+			)
+		}
+
+		if len(d.AllowedValues) > 0 && !selectPropertyValueTypes[d.ValueType] {
+			return fmt.Errorf(
+				"repo_custom_properties[%d] (%q): allowed_values is only valid for single_select and multi_select, not %q",
+				i, d.Name, d.ValueType,
+			)
+		}
+
+		if selectPropertyValueTypes[d.ValueType] && len(d.AllowedValues) == 0 {
+			return fmt.Errorf(
+				"repo_custom_properties[%d] (%q): %s requires at least one entry in allowed_values",
+				i, d.Name, d.ValueType,
+			)
+		}
+	}
+	return nil
+}
 
 // validateAPIURL validates and normalises a GitHub API base URL.
 func validateAPIURL(raw string, log *slog.Logger) (string, error) {

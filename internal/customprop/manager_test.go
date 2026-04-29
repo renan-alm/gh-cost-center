@@ -603,3 +603,266 @@ func TestCreateBudgets_DisabledProducts(t *testing.T) {
 		t.Errorf("expected nil error when all products disabled, got %v", err)
 	}
 }
+
+// --- ValidateFiltersAgainstSchema tests ---
+
+func TestValidateFiltersAgainstSchema_AllValid(t *testing.T) {
+	mgr := newTestManager([]config.CustomPropCostCenter{
+		{
+			Name: "Backend",
+			Filters: []config.CustomPropertyFilter{
+				{Property: "team", Value: "backend"},
+			},
+		},
+	})
+
+	schema := []config.RepoCustomPropertyDef{
+		{Name: "team", ValueType: "single_select", AllowedValues: []string{"backend", "frontend"}},
+	}
+
+	warnings := mgr.ValidateFiltersAgainstSchema(schema)
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings, got %v", warnings)
+	}
+}
+
+func TestValidateFiltersAgainstSchema_UnknownProperty(t *testing.T) {
+	mgr := newTestManager([]config.CustomPropCostCenter{
+		{
+			Name: "Backend",
+			Filters: []config.CustomPropertyFilter{
+				{Property: "unknown-prop", Value: "x"},
+			},
+		},
+	})
+
+	schema := []config.RepoCustomPropertyDef{
+		{Name: "team", ValueType: "string"},
+	}
+
+	warnings := mgr.ValidateFiltersAgainstSchema(schema)
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
+	}
+	if !strings.Contains(warnings[0], "not defined in repo_custom_properties schema") {
+		t.Errorf("unexpected warning: %s", warnings[0])
+	}
+}
+
+func TestValidateFiltersAgainstSchema_InvalidValue(t *testing.T) {
+	mgr := newTestManager([]config.CustomPropCostCenter{
+		{
+			Name: "Backend",
+			Filters: []config.CustomPropertyFilter{
+				{Property: "team", Value: "devops"},
+			},
+		},
+	})
+
+	schema := []config.RepoCustomPropertyDef{
+		{Name: "team", ValueType: "single_select", AllowedValues: []string{"backend", "frontend"}},
+	}
+
+	warnings := mgr.ValidateFiltersAgainstSchema(schema)
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
+	}
+	if !strings.Contains(warnings[0], "not in allowed_values") {
+		t.Errorf("unexpected warning: %s", warnings[0])
+	}
+}
+
+func TestValidateFiltersAgainstSchema_EmptySchema(t *testing.T) {
+	mgr := newTestManager([]config.CustomPropCostCenter{
+		{
+			Name:    "Backend",
+			Filters: []config.CustomPropertyFilter{{Property: "team", Value: "x"}},
+		},
+	})
+
+	warnings := mgr.ValidateFiltersAgainstSchema(nil)
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings for nil schema, got %v", warnings)
+	}
+}
+
+func TestValidateFiltersAgainstSchema_StringTypeNoAllowedValues(t *testing.T) {
+	mgr := newTestManager([]config.CustomPropCostCenter{
+		{
+			Name: "Backend",
+			Filters: []config.CustomPropertyFilter{
+				{Property: "team", Value: "anything"},
+			},
+		},
+	})
+
+	schema := []config.RepoCustomPropertyDef{
+		{Name: "team", ValueType: "string"},
+	}
+
+	warnings := mgr.ValidateFiltersAgainstSchema(schema)
+	if len(warnings) != 0 {
+		t.Errorf("expected no warnings for string type without allowed_values, got %v", warnings)
+	}
+}
+
+// --- GenerateSummary tests ---
+
+func TestGenerateSummary(t *testing.T) {
+	// Mock HTTP server returning repos with properties.
+	repos := []github.RepoProperties{
+		{
+			RepositoryName:     "repo1",
+			RepositoryFullName: "org/repo1",
+			Properties: []github.Property{
+				{PropertyName: "team", Value: "backend"},
+			},
+		},
+		{
+			RepositoryName:     "repo2",
+			RepositoryFullName: "org/repo2",
+			Properties: []github.Property{
+				{PropertyName: "team", Value: "frontend"},
+			},
+		},
+		{
+			RepositoryName:     "repo3",
+			RepositoryFullName: "org/repo3",
+			Properties: []github.Property{
+				{PropertyName: "team", Value: "backend"},
+			},
+		},
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(repos)
+	}))
+	defer srv.Close()
+
+	client := newTestClientFromURL(t, srv.URL)
+	costCenters := []config.CustomPropCostCenter{
+		{
+			Name:    "Backend",
+			Filters: []config.CustomPropertyFilter{{Property: "team", Value: "backend"}},
+		},
+		{
+			Name:    "Frontend",
+			Filters: []config.CustomPropertyFilter{{Property: "team", Value: "frontend"}},
+		},
+	}
+
+	cfg := &config.Manager{
+		CustomPropCostCenters: costCenters,
+	}
+	mgr, err := NewManager(cfg, client, testLogger())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	summary, err := mgr.GenerateSummary("org")
+	if err != nil {
+		t.Fatalf("GenerateSummary error: %v", err)
+	}
+
+	if summary.TotalRepos != 3 {
+		t.Errorf("TotalRepos = %d, want 3", summary.TotalRepos)
+	}
+	if summary.TotalCCs != 2 {
+		t.Errorf("TotalCCs = %d, want 2", summary.TotalCCs)
+	}
+	if len(summary.Results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(summary.Results))
+	}
+	if summary.Results[0].ReposMatched != 2 {
+		t.Errorf("Backend matched = %d, want 2", summary.Results[0].ReposMatched)
+	}
+	if summary.Results[1].ReposMatched != 1 {
+		t.Errorf("Frontend matched = %d, want 1", summary.Results[1].ReposMatched)
+	}
+}
+
+// --- removeUnmatchedRepos tests ---
+
+func TestRemoveUnmatchedRepos_RemovesStale(t *testing.T) {
+	const testCCID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+	var removedRepos []string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/cost-centers/"+testCCID) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":    testCCID,
+				"name":  "Backend",
+				"state": "active",
+				"resources": []map[string]string{
+					{"type": "Repository", "name": "org/repo1"},
+					{"type": "Repository", "name": "org/repo2"},
+					{"type": "Repository", "name": "org/stale-repo"},
+				},
+			})
+			return
+		}
+
+		if r.Method == http.MethodDelete {
+			var body map[string][]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			removedRepos = body["repositories"]
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := newTestClientFromURL(t, srv.URL)
+	mgr := &Manager{
+		cfg:    &config.Manager{CustomPropRemoveUnmatched: true},
+		client: client,
+		log:    testLogger(),
+	}
+
+	removed, err := mgr.removeUnmatchedRepos(testCCID, "Backend", []string{"org/repo1", "org/repo2"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("removed = %d, want 1", removed)
+	}
+	if len(removedRepos) != 1 || removedRepos[0] != "org/stale-repo" {
+		t.Errorf("unexpected removed repos: %v", removedRepos)
+	}
+}
+
+func TestRemoveUnmatchedRepos_NothingToRemove(t *testing.T) {
+	const testCCID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":    testCCID,
+			"name":  "Backend",
+			"state": "active",
+			"resources": []map[string]string{
+				{"type": "Repository", "name": "org/repo1"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := newTestClientFromURL(t, srv.URL)
+	mgr := &Manager{
+		cfg:    &config.Manager{CustomPropRemoveUnmatched: true},
+		client: client,
+		log:    testLogger(),
+	}
+
+	removed, err := mgr.removeUnmatchedRepos(testCCID, "Backend", []string{"org/repo1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("removed = %d, want 0", removed)
+	}
+}

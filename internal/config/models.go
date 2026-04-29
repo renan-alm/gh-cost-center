@@ -3,11 +3,12 @@ package config
 
 // Config is the top-level configuration structure that mirrors the YAML file.
 type Config struct {
-	GitHub     GitHubConfig     `yaml:"github"`
-	CostCenter CostCenterConfig `yaml:"cost_center"`
-	Budgets    BudgetsConfig    `yaml:"budgets"`
-	Logging    LoggingConfig    `yaml:"logging"`
-	ExportDir  string           `yaml:"export_dir"`
+	GitHub               GitHubConfig            `yaml:"github"`
+	CostCenter           CostCenterConfig        `yaml:"cost_center"`
+	Budgets              BudgetsConfig           `yaml:"budgets"`
+	Logging              LoggingConfig           `yaml:"logging"`
+	ExportDir            string                  `yaml:"export_dir"`
+	RepoCustomProperties []RepoCustomPropertyDef `yaml:"repo_custom_properties"`
 }
 
 // GitHubConfig holds GitHub-related settings.
@@ -60,7 +61,8 @@ type ExplicitMapping struct {
 
 // CustomPropConfig holds AND-filter custom-property cost center definitions.
 type CustomPropConfig struct {
-	CostCenters []CustomPropCostCenter `yaml:"cost_centers"`
+	CostCenters          []CustomPropCostCenter `yaml:"cost_centers"`
+	RemoveUnmatchedRepos bool                   `yaml:"remove_unmatched_repos"`
 }
 
 // CustomPropCostCenter defines a cost center discovered via GitHub custom
@@ -95,4 +97,29 @@ type BudgetsConfig struct {
 type ProductBudget struct {
 	Amount  int  `yaml:"amount"`
 	Enabled bool `yaml:"enabled"`
+}
+
+// RepoCustomPropertyDef defines a GitHub repository custom property schema.
+// These definitions describe which custom properties exist in the GitHub
+// organization and can be used to validate filters in repos/custom-prop modes.
+type RepoCustomPropertyDef struct {
+	// Name is the property key as it appears on the repository.
+	Name string `yaml:"name"`
+
+	// ValueType describes the property's data type.
+	// Must be one of: "string", "single_select", "multi_select", "true_false".
+	ValueType string `yaml:"value_type"`
+
+	// Required indicates whether the property must be set on every repository.
+	Required bool `yaml:"required"`
+
+	// DefaultValue is the value used when the property is not explicitly set.
+	DefaultValue string `yaml:"default_value"`
+
+	// Description is a human-readable explanation of the property's purpose.
+	Description string `yaml:"description"`
+
+	// AllowedValues lists the valid options for "single_select" and
+	// "multi_select" properties.  Ignored for other value types.
+	AllowedValues []string `yaml:"allowed_values"`
 }

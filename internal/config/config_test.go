@@ -558,6 +558,53 @@ cost_center:
 	}
 }
 
+func TestLoad_CustomPropModeRemoveUnmatched(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+  organizations: ["org"]
+cost_center:
+  mode: "custom-prop"
+  custom_prop:
+    remove_unmatched_repos: true
+    cost_centers:
+      - name: "Backend"
+        filters:
+          - property: "team"
+            value: "backend"
+`
+	m, err := Load(writeConfig(t, yaml), logger())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !m.CustomPropRemoveUnmatched {
+		t.Error("expected CustomPropRemoveUnmatched = true")
+	}
+}
+
+func TestLoad_CustomPropModeRemoveUnmatchedDefault(t *testing.T) {
+	yaml := `
+github:
+  enterprise: "ent"
+  organizations: ["org"]
+cost_center:
+  mode: "custom-prop"
+  custom_prop:
+    cost_centers:
+      - name: "Backend"
+        filters:
+          - property: "team"
+            value: "backend"
+`
+	m, err := Load(writeConfig(t, yaml), logger())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if m.CustomPropRemoveUnmatched {
+		t.Error("expected CustomPropRemoveUnmatched = false by default")
+	}
+}
+
 // ---------- Invalid mode ----------
 
 func TestLoad_InvalidMode(t *testing.T) {
@@ -938,5 +985,263 @@ func TestEnvOrFallback(t *testing.T) {
 	}
 	if got := envOrFallback("UNSET_KEY_12345", "yaml-val"); got != "yaml-val" {
 		t.Errorf("got %q, want yaml-val", got)
+	}
+}
+
+// ---------- Repo custom property definitions ----------
+
+func TestLoad_RepoCustomProperties_Valid(t *testing.T) {
+	cfg := `
+github:
+  enterprise: "ent"
+repo_custom_properties:
+  - name: "team"
+    value_type: "single_select"
+    required: true
+    description: "Owning team"
+    allowed_values:
+      - "backend"
+      - "frontend"
+  - name: "environment"
+    value_type: "multi_select"
+    allowed_values:
+      - "production"
+      - "staging"
+  - name: "cost-center-id"
+    value_type: "string"
+    required: false
+    description: "Direct cost center ID"
+  - name: "archived"
+    value_type: "true_false"
+`
+	m, err := Load(writeConfig(t, cfg), logger())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(m.RepoCustomProperties) != 4 {
+		t.Fatalf("expected 4 custom property defs, got %d", len(m.RepoCustomProperties))
+	}
+
+	team := m.RepoCustomProperties[0]
+	if team.Name != "team" {
+		t.Errorf("name = %q, want %q", team.Name, "team")
+	}
+	if team.ValueType != "single_select" {
+		t.Errorf("value_type = %q, want single_select", team.ValueType)
+	}
+	if !team.Required {
+		t.Error("expected required = true")
+	}
+	if team.Description != "Owning team" {
+		t.Errorf("description = %q", team.Description)
+	}
+	if len(team.AllowedValues) != 2 {
+		t.Errorf("expected 2 allowed_values, got %d", len(team.AllowedValues))
+	}
+
+	env := m.RepoCustomProperties[1]
+	if env.ValueType != "multi_select" {
+		t.Errorf("value_type = %q, want multi_select", env.ValueType)
+	}
+
+	costCenter := m.RepoCustomProperties[2]
+	if costCenter.ValueType != "string" {
+		t.Errorf("value_type = %q, want string", costCenter.ValueType)
+	}
+
+	archived := m.RepoCustomProperties[3]
+	if archived.ValueType != "true_false" {
+		t.Errorf("value_type = %q, want true_false", archived.ValueType)
+	}
+}
+
+func TestLoad_RepoCustomProperties_Absent(t *testing.T) {
+	cfg := `
+github:
+  enterprise: "ent"
+`
+	m, err := Load(writeConfig(t, cfg), logger())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(m.RepoCustomProperties) != 0 {
+		t.Errorf("expected empty slice, got %d entries", len(m.RepoCustomProperties))
+	}
+}
+
+func TestLoad_RepoCustomProperties_DefaultValue(t *testing.T) {
+	cfg := `
+github:
+  enterprise: "ent"
+repo_custom_properties:
+  - name: "env"
+    value_type: "single_select"
+    default_value: "development"
+    allowed_values:
+      - "development"
+      - "production"
+`
+	m, err := Load(writeConfig(t, cfg), logger())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if m.RepoCustomProperties[0].DefaultValue != "development" {
+		t.Errorf("default_value = %q, want %q", m.RepoCustomProperties[0].DefaultValue, "development")
+	}
+}
+
+func TestValidateRepoCustomProperties_MissingName(t *testing.T) {
+	defs := []RepoCustomPropertyDef{
+		{Name: "", ValueType: "string"},
+	}
+	if err := validateRepoCustomProperties(defs); err == nil {
+		t.Fatal("expected error for missing name")
+	}
+}
+
+func TestValidateRepoCustomProperties_MissingValueType(t *testing.T) {
+	defs := []RepoCustomPropertyDef{
+		{Name: "team", ValueType: ""},
+	}
+	if err := validateRepoCustomProperties(defs); err == nil {
+		t.Fatal("expected error for missing value_type")
+	}
+}
+
+func TestValidateRepoCustomProperties_InvalidValueType(t *testing.T) {
+	defs := []RepoCustomPropertyDef{
+		{Name: "team", ValueType: "dropdown"},
+	}
+	if err := validateRepoCustomProperties(defs); err == nil {
+		t.Fatal("expected error for invalid value_type")
+	}
+}
+
+func TestValidateRepoCustomProperties_DuplicateName(t *testing.T) {
+	defs := []RepoCustomPropertyDef{
+		{Name: "team", ValueType: "string"},
+		{Name: "team", ValueType: "string"},
+	}
+	if err := validateRepoCustomProperties(defs); err == nil {
+		t.Fatal("expected error for duplicate name")
+	}
+}
+
+func TestValidateRepoCustomProperties_AllowedValuesOnNonSelectType(t *testing.T) {
+	defs := []RepoCustomPropertyDef{
+		{Name: "flag", ValueType: "true_false", AllowedValues: []string{"yes", "no"}},
+	}
+	if err := validateRepoCustomProperties(defs); err == nil {
+		t.Fatal("expected error for allowed_values on true_false type")
+	}
+}
+
+func TestValidateRepoCustomProperties_AllowedValuesOnStringType(t *testing.T) {
+	defs := []RepoCustomPropertyDef{
+		{Name: "note", ValueType: "string", AllowedValues: []string{"a"}},
+	}
+	if err := validateRepoCustomProperties(defs); err == nil {
+		t.Fatal("expected error for allowed_values on string type")
+	}
+}
+
+func TestValidateRepoCustomProperties_SelectTypeMissingAllowedValues(t *testing.T) {
+	tests := []struct {
+		name      string
+		valueType string
+	}{
+		{"single_select without allowed_values", "single_select"},
+		{"multi_select without allowed_values", "multi_select"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defs := []RepoCustomPropertyDef{
+				{Name: "prop", ValueType: tt.valueType},
+			}
+			if err := validateRepoCustomProperties(defs); err == nil {
+				t.Fatalf("expected error for %s without allowed_values", tt.valueType)
+			}
+		})
+	}
+}
+
+func TestValidateRepoCustomProperties_AllValidTypes(t *testing.T) {
+	tests := []struct {
+		name      string
+		valueType string
+		allowed   []string
+	}{
+		{"string", "string", nil},
+		{"true_false", "true_false", nil},
+		{"single_select", "single_select", []string{"a", "b"}},
+		{"multi_select", "multi_select", []string{"x", "y"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defs := []RepoCustomPropertyDef{
+				{Name: "prop", ValueType: tt.valueType, AllowedValues: tt.allowed},
+			}
+			if err := validateRepoCustomProperties(defs); err != nil {
+				t.Fatalf("unexpected error for valid type %q: %v", tt.valueType, err)
+			}
+		})
+	}
+}
+
+func TestLoad_RepoCustomProperties_InvalidYAML(t *testing.T) {
+	cfg := `
+github:
+  enterprise: "ent"
+repo_custom_properties:
+  - name: "flag"
+    value_type: "true_false"
+    allowed_values:
+      - "yes"
+`
+	_, err := Load(writeConfig(t, cfg), logger())
+	if err == nil {
+		t.Fatal("expected error for allowed_values on true_false type")
+	}
+}
+
+func TestSummary_IncludesRepoCustomPropertiesCount(t *testing.T) {
+	cfg := `
+github:
+  enterprise: "ent"
+repo_custom_properties:
+  - name: "team"
+    value_type: "string"
+  - name: "env"
+    value_type: "single_select"
+    allowed_values:
+      - "prod"
+      - "staging"
+`
+	m, err := Load(writeConfig(t, cfg), logger())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	s := m.Summary()
+	count, ok := s["repo_custom_properties_count"]
+	if !ok {
+		t.Fatal("Summary missing key repo_custom_properties_count")
+	}
+	if count != 2 {
+		t.Errorf("repo_custom_properties_count = %v, want 2", count)
+	}
+}
+
+func TestSummary_NoRepoCustomPropertiesKey_WhenEmpty(t *testing.T) {
+	cfg := `
+github:
+  enterprise: "ent"
+`
+	m, err := Load(writeConfig(t, cfg), logger())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	s := m.Summary()
+	if _, ok := s["repo_custom_properties_count"]; ok {
+		t.Error("Summary should not include repo_custom_properties_count when empty")
 	}
 }

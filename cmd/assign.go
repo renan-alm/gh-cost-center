@@ -521,6 +521,15 @@ func runCustomPropAssign(_ *cobra.Command) error {
 		return fmt.Errorf("invalid custom-property configuration: %d issues found", len(issues))
 	}
 
+	// Warn about filters that don't match the schema (non-fatal).
+	if len(cfgManager.RepoCustomProperties) > 0 {
+		if warnings := cpMgr.ValidateFiltersAgainstSchema(cfgManager.RepoCustomProperties); len(warnings) > 0 {
+			for _, w := range warnings {
+				logger.Warn("Schema validation warning", "detail", w)
+			}
+		}
+	}
+
 	cpMgr.PrintConfigSummary(org)
 
 	// Confirmation in apply mode.
