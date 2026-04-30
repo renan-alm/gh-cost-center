@@ -5,41 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-## [2.1.0] - 2026-03-10
-## [2.2.0] - 2026-04-29
-
-### Added
-
-- add repo_custom_properties schema definitions (f53ea06)
-- Add custom property validation against schema (b2467ac)
-- add repo_custom_properties config section with validation and tests (5bb1de3)
-
-### Other
-
-- add test coverage to gitignore (d643e90)
-
 ## [2.1.1] - 2026-03-23
 
 ### Fixed
 
-- support UUID values in manual team mappings (c0e0690)
+- UUID values in `teams.mappings` are now used directly as cost center IDs instead of being passed to the name-resolution API, which previously caused "cost center not found" errors (c0e0690)
+
+### Changed
+
+- Docs (README, QUICK_CONFIG_GUIDE, config.example.yaml) clarified that mapping values accept both names and UUIDs
+- `actions/download-artifact` bumped from 7 to 8
+- `actions/upload-artifact` bumped from 6 to 7
 
 ## [2.1.0] - 2026-03-11
 
 ### Added
 
 - Fail fast approach, logs refactoring and add tests (34ad3e0)
+- Comprehensive test coverage for error propagation: budget manager, teams, repository, customprop, cmd/version, and logging packages
 
 ### Changed
 
 - Update project version to 2.0.0 (08038f6)
+- Standardized plan-mode log messages to `"mode=plan: would <action>"` format
 
 ### Fixed
 
 - repair release workflow parsing and clean up CHANGELOG for v2.1.0 (55c8b82)
 - resolve cost center names to UUIDs when auto_create is disabled (7af8f73)
+- Partial assignment failures now exit non-zero (`logAssignmentResults` returns error)
+- `EnsureBudgetsForCostCenter` accumulates and returns per-product failures instead of swallowing them
+- Scanner I/O errors in confirmation prompts are now propagated
+- Timestamp save failures return errors instead of only logging
+- Version command uses `RunE` to surface I/O failures
+- Removed duplicate SIGPIPE handler (consolidated into `main.go`)
 
 
 ### Fixed — Error Propagation & Exit Codes
