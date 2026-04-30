@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [2.1.1] - 2026-03-23
+## [2.2.0] - 2026-04-30
+
+### Added
+
+- add repo_custom_properties schema definitions (f53ea06)
+- Add custom property validation against schema (b2467ac)
+- add repo_custom_properties config section with validation and tests (5bb1de3)
+
+### Fixed
+
+- Update GitHub token in release workflow (8005099)
+
+### Other
+
+- add test coverage to gitignore (d643e90)
+
 
 ### Fixed
 
